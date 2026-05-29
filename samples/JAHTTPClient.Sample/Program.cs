@@ -19,8 +19,12 @@ await VerifyFingerprintAsync();
 await DemonstrateExecuteShortWebRequestAsync();
 
 // 3) ---- (Optional) high-concurrency smoke test -------------------------------
-//    Uncomment to drive thousands of concurrent requests.
-// await ConcurrencySmokeTestAsync(requests: 5000);
+//    Run with:  dotnet run -- --load [count]   (default 5000 concurrent POSTs)
+if (args.Length > 0 && args[0] == "--load")
+{
+    var count = args.Length > 1 && int.TryParse(args[1], out var n) ? n : 5000;
+    await ConcurrencySmokeTestAsync(count);
+}
 
 return;
 
@@ -168,13 +172,13 @@ static async Task ConcurrencySmokeTestAsync(int requests)
     var ok = 0;
     var failed = 0;
 
-    var tasks = Enumerable.Range(0, requests).Select(async _ =>
+    var tasks = Enumerable.Range(0, requests).Select(async i =>
     {
         try
         {
             var content = new StringContent("{\"ping\":true}", Encoding.UTF8, "application/json");
             using var resp = await client.PostAsync("https://tools.scrapfly.io/api/fp/ja3", content);
-            _ = await resp.Content.ReadAsStringAsync();
+            await resp.Content.ReadAsStringAsync();
             Interlocked.Increment(ref ok);
         }
         catch
