@@ -12,19 +12,30 @@ using JAHTTPClient.Fingerprinting;
 // scripts). Without it, requests throw a DllNotFoundException.
 // =============================================================================
 
+// Modes:
+//   (no args)         -> JA3 check + ExecuteShortWEBRequestAsync demo
+//   --probe [url]     -> hit a real anti-bot target at 3 redirect levels and
+//                        report whether it blocked (default: kleinanzeigen login)
+//   --load [count]    -> high-concurrency smoke test (default 5000 POSTs)
+if (args.Length > 0 && args[0] == "--probe")
+{
+    var url = args.Length > 1 ? args[1] : "https://www.kleinanzeigen.de/m-einloggen.html?targetUrl=/";
+    await ProbeTargetAsync(url);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--load")
+{
+    var count = args.Length > 1 && int.TryParse(args[1], out var n) ? n : 5000;
+    await ConcurrencySmokeTestAsync(count);
+    return;
+}
+
 // 1) ---- Verify the TLS fingerprint against scrapfly --------------------------
 await VerifyFingerprintAsync();
 
 // 2) ---- Demonstrate the HttpClient-style migration helper --------------------
 await DemonstrateExecuteShortWebRequestAsync();
-
-// 3) ---- (Optional) high-concurrency smoke test -------------------------------
-//    Run with:  dotnet run -- --load [count]   (default 5000 concurrent POSTs)
-if (args.Length > 0 && args[0] == "--load")
-{
-    var count = args.Length > 1 && int.TryParse(args[1], out var n) ? n : 5000;
-    await ConcurrencySmokeTestAsync(count);
-}
 
 return;
 
@@ -191,6 +202,66 @@ static async Task ConcurrencySmokeTestAsync(int requests)
     sw.Stop();
 
     Console.WriteLine($"ok={ok} failed={failed} elapsed={sw.Elapsed.TotalSeconds:F1}s");
+}
+
+// Probe a real anti-bot protected target (e.g. Akamai) at three redirect levels.
+// On a clean/residential IP with direct egress this should NOT show the IP-ban
+// page: the first hop is a 3xx into the login flow.
+static async Task ProbeTargetAsync(string url)
+{
+    Console.WriteLine($"== Probe: {url} ==\n");
+
+    foreach (var (label, redirect, max) in new[]
+    {
+        ("AllowAutoRedirect=false (raw first hop)", false, 0),
+        ("Max=1 (catch the first redirect)", true, 1),
+        ("Max=10 (follow the whole chain)", true, 10),
+    })
+    {
+        Console.WriteLine($"----- {label} -----");
+        try
+        {
+            using var client = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
+            {
+                EnableJa3Fingerprinting = true,
+                FingerprintPreset = Ja3Preset.Chrome,
+                AllowAutoRedirect = redirect,
+                MaxAutomaticRedirections = max,
+                Timeout = TimeSpan.FromSeconds(30),
+                // Proxy = "http://user:pass@host:port", // recommended: clean/residential proxy
+            });
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.TryAddWithoutValidation("Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
+            req.Headers.TryAddWithoutValidation("Accept-Language", "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7");
+            req.Headers.TryAddWithoutValidation("Accept-Encoding", "gzip, deflate, br, zstd");
+            req.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+            req.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "none");
+            req.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "navigate");
+            req.Headers.TryAddWithoutValidation("Sec-Fetch-User", "?1");
+            req.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
+
+            using var resp = await client.SendAsync(req);
+            var body = await resp.Content.ReadAsStringAsync();
+            var loc = resp.Headers.Location?.ToString() ?? "(none)";
+            var banned = (int)resp.StatusCode is 403 or 429 or 503
+                         || body.Contains("IP-Bereich", StringComparison.OrdinalIgnoreCase)
+                         || body.Contains("gesperrt", StringComparison.OrdinalIgnoreCase);
+
+            Console.WriteLine($"  status   : {(int)resp.StatusCode} {resp.StatusCode}");
+            Console.WriteLine($"  finalUrl : {resp.RequestMessage?.RequestUri}");
+            Console.WriteLine($"  location : {loc}");
+            Console.WriteLine($"  bodyLen  : {body.Length}");
+            Console.WriteLine($"  body     : {Truncate(body.Replace('\n', ' '), 200)}");
+            Console.WriteLine(banned ? "  VERDICT  : ❌ BLOCKED (IP-ban / fingerprint detected)\n"
+                                     : "  VERDICT  : ✅ NOT blocked (passed)\n");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  EXCEPTION: {ex.GetType().Name}: {ex.Message}\n");
+        }
+    }
 }
 
 static string Truncate(string value, int max)
