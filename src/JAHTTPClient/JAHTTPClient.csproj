@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>JAHTTPClient</RootNamespace>
+    <AssemblyName>JAHTTPClient</AssemblyName>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <!-- Required for [LibraryImport] source-generated P/Invoke marshalling. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!--
+    The native tls-client shared library (built from /native via build-windows.ps1
+    or the Makefile) is copied next to the managed assembly so that
+    NativeLibraryResolver can locate it at runtime per RID.
+
+    Files are picked up only if they exist, so the project still builds before the
+    native binary has been produced.
+  -->
+  <ItemGroup>
+    <None Include="runtimes/**/*" Condition="Exists('runtimes')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>runtimes/%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+</Project>

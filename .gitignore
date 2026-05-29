@@ -1,0 +1,25 @@
+# .NET build output
+bin/
+obj/
+*.user
+
+# Native build artifacts
+native/*.h
+native/*.so
+native/*.dll
+native/*.dylib
+
+# The compiled native libraries are produced locally and dropped here.
+# Track the folder layout but not the (large, platform-specific) binaries.
+src/JAHTTPClient/runtimes/**/*.dll
+src/JAHTTPClient/runtimes/**/*.so
+src/JAHTTPClient/runtimes/**/*.dylib
+src/JAHTTPClient/runtimes/**/*.h
+
+# Go
+native/go.sum
+
+# IDE
+.vs/
+.idea/
+*.swp
