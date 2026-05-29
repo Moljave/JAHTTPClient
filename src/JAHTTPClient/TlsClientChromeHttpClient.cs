@@ -92,7 +92,9 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             var payload = BuildPayload(method, currentUri, orderedHeaders, body, isByteBody);
             var response = await ExecuteAsync(payload, cancellationToken).ConfigureAwait(false);
 
-            if (ShouldRedirect(response.Status, redirects, out var location) &&
+            var location = ExtractLocation(response);
+            if (location is not null &&
+                ShouldRedirect(response.Status, redirects) &&
                 Uri.TryCreate(currentUri, location, out var next))
             {
                 redirects++;
@@ -277,15 +279,33 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
 
     // ---- redirect handling -------------------------------------------------
 
-    private bool ShouldRedirect(int status, int redirects, out string location)
+    private bool ShouldRedirect(int status, int redirects)
     {
-        location = string.Empty;
         if (!_options.AllowAutoRedirect || redirects >= _options.MaxAutomaticRedirections)
         {
             return false;
         }
 
         return status is >= 300 and < 400;
+    }
+
+    /// <summary>Reads the (case-insensitive) Location header from a native response.</summary>
+    private static string? ExtractLocation(TlsResponsePayload response)
+    {
+        if (response.Headers is null)
+        {
+            return null;
+        }
+
+        foreach (var (name, values) in response.Headers)
+        {
+            if (name.Equals("Location", StringComparison.OrdinalIgnoreCase) && values.Count > 0)
+            {
+                return string.IsNullOrWhiteSpace(values[0]) ? null : values[0];
+            }
+        }
+
+        return null;
     }
 
     private static (HttpMethod method, string? body, bool isByte) NextHop(
