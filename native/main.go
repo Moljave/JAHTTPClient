@@ -1,74 +1,370 @@
-// Package main builds a C-shared library (.dll / .so / .dylib) that exposes the
+// Package main builds a C-shared library (.dll / .so / .dylib) exposing the
 // bogdanfinn/tls-client CFFI surface to non-Go callers (here: the .NET
 // ChromeHttpClient via P/Invoke).
 //
-// It is a thin delegation layer over github.com/bogdanfinn/tls-client/cffi_src
-// — the same surface the official tls-client release binaries expose — so that
-// our .NET interop talks to a well-tested, maintained core (utls under the hood)
-// instead of a bespoke fork.
+// This file is vendored verbatim from the upstream cffi distribution
+// (github.com/bogdanfinn/tls-client/cffi_dist, which is a nested module and
+// therefore cannot be `go get`/imported directly). It delegates to the
+// importable github.com/bogdanfinn/tls-client/cffi_src package, so it stays in
+// lockstep with the tls-client version pinned in go.mod (v1.14.0).
 //
 // Build (shared library):
 //
-//	CGO_ENABLED=1 go build -buildmode=c-shared -o tls-client.dll   # Windows
-//	CGO_ENABLED=1 go build -buildmode=c-shared -o tls-client.so    # Linux
+//	CGO_ENABLED=1 go build -buildmode=c-shared -o tls-client-windows-64.dll .   # Windows
+//	CGO_ENABLED=1 go build -buildmode=c-shared -o tls-client-linux-amd64.so .   # Linux
 //
-// See ../native/Makefile and ../native/build-windows.ps1.
+// See ./Makefile and ./build-windows.ps1.
 package main
 
+/*
+#include <stdlib.h>
+*/
 import "C"
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"sync"
+	"unsafe"
+
+	http "github.com/bogdanfinn/fhttp"
 	tls_client_cffi_src "github.com/bogdanfinn/tls-client/cffi_src"
+	"github.com/google/uuid"
 )
 
-// request performs an HTTP request described by the JSON payload and returns a
-// JSON response. The returned C string is owned by the native side and MUST be
-// released by the caller via freeMemory(response.id) once it has been read.
-//
-//export request
-func request(payload *C.char) *C.char {
-	return C.CString(tls_client_cffi_src.Request(C.GoString(payload)))
-}
+var (
+	unsafePointers    = make(map[string]*C.char)
+	unsafePointersLck = sync.Mutex{}
+)
 
-// getCookiesFromSession returns the cookies currently stored in the cookie jar
-// of the session identified in the JSON payload ({sessionId, url}).
-//
-//export getCookiesFromSession
-func getCookiesFromSession(payload *C.char) *C.char {
-	return C.CString(tls_client_cffi_src.GetCookiesFromSession(C.GoString(payload)))
-}
-
-// addCookiesToSession inserts/overwrites cookies in the jar of the given
-// session. Payload: {sessionId, url, cookies:[{name,value,path,domain,...}]}.
-//
-//export addCookiesToSession
-func addCookiesToSession(payload *C.char) *C.char {
-	return C.CString(tls_client_cffi_src.AddCookiesToSession(C.GoString(payload)))
-}
-
-// destroySession releases the client/cookie-jar associated with a sessionId.
-// Payload: {sessionId}.
-//
-//export destroySession
-func destroySession(payload *C.char) *C.char {
-	return C.CString(tls_client_cffi_src.DestroySession(C.GoString(payload)))
-}
-
-// destroyAll releases every session held by the library. Useful on process
-// shutdown to guarantee no leaks.
-//
-//export destroyAll
-func destroyAll() *C.char {
-	return C.CString(tls_client_cffi_src.DestroyAll())
-}
-
-// freeMemory releases a C string previously returned by request /
-// getCookiesFromSession / addCookiesToSession, identified by the "id" field of
-// the corresponding JSON response.
-//
 //export freeMemory
 func freeMemory(responseId *C.char) {
-	tls_client_cffi_src.FreeMemory(C.GoString(responseId))
+	responseIdString := C.GoString(responseId)
+
+	unsafePointersLck.Lock()
+	defer unsafePointersLck.Unlock()
+
+	ptr, ok := unsafePointers[responseIdString]
+
+	if !ok {
+		return
+	}
+
+	C.free(unsafe.Pointer(ptr))
+
+	delete(unsafePointers, responseIdString)
 }
 
-func main() {}
+//export destroyAll
+func destroyAll() *C.char {
+	tls_client_cffi_src.ClearSessionCache()
+
+	out := tls_client_cffi_src.DestroyOutput{
+		Id:      uuid.New().String(),
+		Success: true,
+	}
+
+	jsonResponse, marshallError := json.Marshal(out)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse("", false, clientErr)
+	}
+
+	responseString := C.CString(string(jsonResponse))
+
+	unsafePointersLck.Lock()
+	unsafePointers[out.Id] = responseString
+	unsafePointersLck.Unlock()
+
+	return responseString
+}
+
+//export destroySession
+func destroySession(destroySessionParams *C.char) *C.char {
+	destroySessionParamsJson := C.GoString(destroySessionParams)
+
+	destroySessionInput := tls_client_cffi_src.DestroySessionInput{}
+	marshallError := json.Unmarshal([]byte(destroySessionParamsJson), &destroySessionInput)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse("", false, clientErr)
+	}
+
+	tls_client_cffi_src.RemoveSession(destroySessionInput.SessionId)
+
+	out := tls_client_cffi_src.DestroyOutput{
+		Id:      uuid.New().String(),
+		Success: true,
+	}
+
+	jsonResponse, marshallError := json.Marshal(out)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse(destroySessionInput.SessionId, true, clientErr)
+	}
+
+	responseString := C.CString(string(jsonResponse))
+
+	unsafePointersLck.Lock()
+	unsafePointers[out.Id] = responseString
+	unsafePointersLck.Unlock()
+
+	return responseString
+}
+
+//export getCookiesFromSession
+func getCookiesFromSession(getCookiesParams *C.char) *C.char {
+	getCookiesParamsJson := C.GoString(getCookiesParams)
+
+	cookiesInput := tls_client_cffi_src.GetCookiesFromSessionInput{}
+	marshallError := json.Unmarshal([]byte(getCookiesParamsJson), &cookiesInput)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse("", false, clientErr)
+	}
+
+	tlsClient, err := tls_client_cffi_src.GetClient(cookiesInput.SessionId)
+	if err != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(err)
+
+		return handleErrorResponse(cookiesInput.SessionId, true, clientErr)
+	}
+
+	u, parsErr := url.Parse(cookiesInput.Url)
+	if parsErr != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(parsErr)
+
+		return handleErrorResponse(cookiesInput.SessionId, true, clientErr)
+	}
+
+	cookies := tlsClient.GetCookies(u)
+
+	out := tls_client_cffi_src.CookiesFromSessionOutput{
+		Id:      uuid.New().String(),
+		Cookies: transformCookies(cookies),
+	}
+
+	jsonResponse, marshallError := json.Marshal(out)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse(cookiesInput.SessionId, true, clientErr)
+	}
+
+	responseString := C.CString(string(jsonResponse))
+
+	unsafePointersLck.Lock()
+	unsafePointers[out.Id] = responseString
+	unsafePointersLck.Unlock()
+
+	return responseString
+}
+
+//export addCookiesToSession
+func addCookiesToSession(addCookiesParams *C.char) *C.char {
+	addCookiesParamsJson := C.GoString(addCookiesParams)
+
+	cookiesInput := tls_client_cffi_src.AddCookiesToSessionInput{}
+	marshallError := json.Unmarshal([]byte(addCookiesParamsJson), &cookiesInput)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse("", false, clientErr)
+	}
+
+	tlsClient, err := tls_client_cffi_src.GetClient(cookiesInput.SessionId)
+	if err != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(err)
+
+		return handleErrorResponse(cookiesInput.SessionId, true, clientErr)
+	}
+
+	u, parsErr := url.Parse(cookiesInput.Url)
+	if parsErr != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(parsErr)
+
+		return handleErrorResponse(cookiesInput.SessionId, true, clientErr)
+	}
+
+	tlsClient.SetCookies(u, buildCookies(cookiesInput.Cookies))
+
+	allCookies := tlsClient.GetCookies(u)
+
+	out := tls_client_cffi_src.CookiesFromSessionOutput{
+		Id:      uuid.New().String(),
+		Cookies: transformCookies(allCookies),
+	}
+
+	jsonResponse, marshallError := json.Marshal(out)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse(cookiesInput.SessionId, true, clientErr)
+	}
+
+	responseString := C.CString(string(jsonResponse))
+
+	unsafePointersLck.Lock()
+	unsafePointers[out.Id] = responseString
+	unsafePointersLck.Unlock()
+
+	return responseString
+}
+
+//export request
+func request(requestParams *C.char) *C.char {
+	requestParamsJson := C.GoString(requestParams)
+
+	requestInput := tls_client_cffi_src.RequestInput{}
+	marshallError := json.Unmarshal([]byte(requestParamsJson), &requestInput)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse("", false, clientErr)
+	}
+
+	tlsClient, sessionId, withSession, err := tls_client_cffi_src.CreateClient(requestInput)
+	if err != nil {
+		return handleErrorResponse(sessionId, withSession, err)
+	}
+
+	req, err := tls_client_cffi_src.BuildRequest(requestInput)
+	if err != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(err)
+
+		return handleErrorResponse(sessionId, withSession, clientErr)
+	}
+
+	cookies := buildCookies(requestInput.RequestCookies)
+
+	if tlsClient.GetCookieJar() != nil && len(cookies) > 0 {
+		tlsClient.SetCookies(req.URL, cookies)
+	} else {
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+	}
+
+	resp, reqErr := tlsClient.Do(req)
+
+	if reqErr != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(fmt.Errorf("failed to do request: %w", reqErr))
+
+		return handleErrorResponse(sessionId, withSession, clientErr)
+	}
+
+	if resp == nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(fmt.Errorf("response is nil"))
+
+		return handleErrorResponse(sessionId, withSession, clientErr)
+	}
+
+	targetCookies := tlsClient.GetCookies(resp.Request.URL)
+
+	response, err := tls_client_cffi_src.BuildResponse(sessionId, withSession, resp, targetCookies, requestInput)
+	if err != nil {
+		return handleErrorResponse(sessionId, withSession, err)
+	}
+
+	jsonResponse, marshallError := json.Marshal(response)
+
+	if marshallError != nil {
+		clientErr := tls_client_cffi_src.NewTLSClientError(marshallError)
+
+		return handleErrorResponse(sessionId, withSession, clientErr)
+	}
+
+	responseString := C.CString(string(jsonResponse))
+
+	unsafePointersLck.Lock()
+	unsafePointers[response.Id] = responseString
+	unsafePointersLck.Unlock()
+
+	return responseString
+}
+
+func handleErrorResponse(sessionId string, withSession bool, err *tls_client_cffi_src.TLSClientError) *C.char {
+	response := tls_client_cffi_src.Response{
+		Id:      uuid.New().String(),
+		Status:  0,
+		Body:    err.Error(),
+		Headers: nil,
+		Cookies: nil,
+	}
+
+	if withSession {
+		response.SessionId = sessionId
+	}
+
+	jsonResponse, marshallError := json.Marshal(response)
+
+	if marshallError != nil {
+		errStr := C.CString(marshallError.Error())
+
+		return errStr
+	}
+
+	responseString := C.CString(string(jsonResponse))
+
+	unsafePointersLck.Lock()
+	unsafePointers[response.Id] = responseString
+	unsafePointersLck.Unlock()
+
+	return responseString
+}
+
+func buildCookies(cookies []tls_client_cffi_src.Cookie) []*http.Cookie {
+	var ret []*http.Cookie
+
+	for _, cookie := range cookies {
+		ret = append(ret, &http.Cookie{
+			Name:     cookie.Name,
+			Value:    cookie.Value,
+			Path:     cookie.Path,
+			Domain:   cookie.Domain,
+			Expires:  cookie.Expires.Time,
+			MaxAge:   cookie.MaxAge,
+			Secure:   cookie.Secure,
+			HttpOnly: cookie.HttpOnly,
+		})
+	}
+
+	return ret
+}
+
+func transformCookies(cookies []*http.Cookie) []tls_client_cffi_src.Cookie {
+	var ret []tls_client_cffi_src.Cookie
+
+	for _, cookie := range cookies {
+		ret = append(ret, tls_client_cffi_src.Cookie{
+			Name:     cookie.Name,
+			Value:    cookie.Value,
+			Path:     cookie.Path,
+			Domain:   cookie.Domain,
+			MaxAge:   cookie.MaxAge,
+			Secure:   cookie.Secure,
+			HttpOnly: cookie.HttpOnly,
+			Expires: tls_client_cffi_src.Timestamp{
+				Time: cookie.Expires,
+			},
+		})
+	}
+
+	return ret
+}
+
+func main() {
+}

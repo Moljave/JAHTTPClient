@@ -315,7 +315,7 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
     {
         var response = new HttpResponseMessage((HttpStatusCode)payload.Status);
 
-        var bytes = DecodeBody(payload.Body);
+        var (bytes, dataUriMediaType) = DecodeBody(payload.Body);
         response.Content = new ByteArrayContent(bytes);
 
         if (payload.Headers is not null)
@@ -339,6 +339,13 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             }
         }
 
+        // If the upstream didn't surface a Content-Type but the data-URI body
+        // carried one, apply it so ReadAsStringAsync picks the right charset.
+        if (response.Content.Headers.ContentType is null && dataUriMediaType is not null)
+        {
+            response.Content.Headers.TryAddWithoutValidation("Content-Type", dataUriMediaType);
+        }
+
         // Reflect the final landing URL so callers reading RequestMessage.RequestUri
         // (e.g. after redirects) see where they actually ended up.
         response.RequestMessage = new HttpRequestMessage(finalMethod, finalUri)
@@ -349,21 +356,53 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         return response;
     }
 
-    private static byte[] DecodeBody(string? body)
+    private static (byte[] Bytes, string? MediaType) DecodeBody(string? body)
     {
         if (string.IsNullOrEmpty(body))
         {
-            return [];
+            return ([], null);
+        }
+
+        // With isByteResponse=true the native layer returns the body as an
+        // RFC 2397 data URI:  data:<mediatype>[;base64],<payload>
+        if (body.StartsWith("data:", StringComparison.Ordinal))
+        {
+            var comma = body.IndexOf(',');
+            if (comma > 0)
+            {
+                var meta = body[5..comma];          // e.g. "text/plain;charset=utf-8;base64"
+                var payload = body[(comma + 1)..];
+
+                const string base64Token = ";base64";
+                var isBase64 = meta.EndsWith(base64Token, StringComparison.OrdinalIgnoreCase);
+                var mediaType = isBase64 ? meta[..^base64Token.Length] : meta;
+                if (string.IsNullOrWhiteSpace(mediaType))
+                {
+                    mediaType = null;
+                }
+
+                try
+                {
+                    var data = isBase64
+                        ? Convert.FromBase64String(payload)
+                        : System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
+                    return (data, mediaType);
+                }
+                catch (FormatException)
+                {
+                    // Fall through to the plain handling below.
+                }
+            }
         }
 
         try
         {
-            return Convert.FromBase64String(body);
+            return (Convert.FromBase64String(body), null);
         }
         catch (FormatException)
         {
             // Defensive: if the native side ever returns a plain string.
-            return System.Text.Encoding.UTF8.GetBytes(body);
+            return (System.Text.Encoding.UTF8.GetBytes(body), null);
         }
     }
 
