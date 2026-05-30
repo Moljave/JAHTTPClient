@@ -29,6 +29,17 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
     private static readonly HashSet<string> SkippedResponseContentHeaders =
         new(StringComparer.OrdinalIgnoreCase) { "Content-Length", "Content-Encoding" };
 
+    // Connection-specific / hop-by-hop headers. HTTP/2 forbids them and the
+    // native h2 transport rejects the whole request if one is present (e.g.
+    // "http2: invalid Connection request header"). Real browsers never carry
+    // these on an h2 request — the transport owns them — so we strip them unless
+    // HTTP/1.1 is forced.
+    private static readonly HashSet<string> Http2ForbiddenHeaders =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Connection", "Keep-Alive", "Proxy-Connection", "Transfer-Encoding", "Upgrade", "TE",
+        };
+
     private readonly ChromeHttpClientOptions _options;
     private readonly FingerprintProfile _profile;
     private readonly string _sessionId;
@@ -148,7 +159,7 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         string? body,
         bool isByteBody)
     {
-        var merged = MergeFingerprintHeaders(uri, headers);
+        var merged = NormalizeHeaders(MergeFingerprintHeaders(uri, headers), _options.ForceHttp1);
 
         return new TlsRequestPayload
         {
@@ -205,6 +216,109 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             {
                 d[k] = v;
             }
+        }
+    }
+
+    /// <summary>
+    /// Defends the outgoing header set against two real-world hazards before it
+    /// reaches the native transport:
+    /// <list type="number">
+    /// <item>Values that smuggled an entire header block via embedded CR/LF —
+    /// common when a raw devtools/Burp paste is added as a single header — are
+    /// unfolded back into the discrete headers the caller meant.</item>
+    /// <item>Connection-specific headers that HTTP/2 forbids are dropped (unless
+    /// HTTP/1.1 is forced), since the Go h2 transport rejects the request
+    /// outright when it sees e.g. <c>Connection</c>.</item>
+    /// </list>
+    /// </summary>
+    private static Dictionary<string, string> NormalizeHeaders(Dictionary<string, string> headers, bool forceHttp1)
+    {
+        var result = headers;
+
+        if (HasLineBreak(headers))
+        {
+            result = new Dictionary<string, string>(headers.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, value) in headers)
+            {
+                if (value.IndexOf('\n') < 0 && value.IndexOf('\r') < 0)
+                {
+                    result[name] = value;
+                    continue;
+                }
+
+                Unfold(result, name, value);
+            }
+        }
+
+        if (!forceHttp1)
+        {
+            foreach (var forbidden in Http2ForbiddenHeaders)
+            {
+                result.Remove(forbidden);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool HasLineBreak(Dictionary<string, string> headers)
+    {
+        foreach (var value in headers.Values)
+        {
+            if (value.IndexOf('\n') >= 0 || value.IndexOf('\r') >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Splits a folded <c>"value\nName: Value\n..."</c> blob back into discrete
+    /// headers. The first physical line stays as <paramref name="name"/>'s value;
+    /// each subsequent <c>"Name: Value"</c> line becomes its own header, and a
+    /// continuation line with no colon is appended to the header being built.
+    /// </summary>
+    private static void Unfold(Dictionary<string, string> target, string name, string value)
+    {
+        var lastName = name;
+        var first = true;
+
+        foreach (var rawLine in value.Split('\n'))
+        {
+            var line = rawLine.Trim('\r', ' ', '\t');
+
+            if (first)
+            {
+                target[name] = line;
+                first = false;
+                continue;
+            }
+
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var colon = line.IndexOf(':');
+            if (colon <= 0)
+            {
+                // Obs-fold continuation line: append to the header being built.
+                target[lastName] = target.TryGetValue(lastName, out var prev) && prev.Length > 0
+                    ? $"{prev} {line}"
+                    : line;
+                continue;
+            }
+
+            var headerName = line[..colon].Trim();
+            if (headerName.Length == 0)
+            {
+                continue;
+            }
+
+            target[headerName] = line[(colon + 1)..].Trim();
+            lastName = headerName;
         }
     }
 
