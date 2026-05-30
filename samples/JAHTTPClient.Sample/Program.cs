@@ -40,6 +40,9 @@ await VerifyKleinanzeigenAsync();
 // 3) ---- Demonstrate the HttpClient-style migration helper --------------------
 await DemonstrateExecuteShortWebRequestAsync();
 
+// 4) ---- Demonstrate runtime redirect toggle + cookie export ------------------
+await DemonstrateCookieExportAndRedirectToggleAsync();
+
 return;
 
 static async Task VerifyFingerprintAsync()
@@ -142,6 +145,45 @@ static async Task DemonstrateExecuteShortWebRequestAsync()
     Console.WriteLine($"body[0..120]={Truncate(result.body, 120)}");
     Console.WriteLine();
 }
+
+// Shows (a) flipping AllowAutoRedirect at runtime — no need to rebuild the
+// client — and (b) exporting the accumulated session cookies as JSON in the
+// browser cookie-extension format for saving/replaying later.
+static async Task DemonstrateCookieExportAndRedirectToggleAsync()
+{
+    Console.WriteLine("== Runtime redirect toggle + cookie export ==");
+
+    using var client = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
+    {
+        EnableJa3Fingerprinting = true,
+        FingerprintPreset = Ja3Preset.Chrome,
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 10,
+    });
+
+    // Flip the policy on the fly: capture the raw 3xx instead of following it.
+    ChangeRedirectionState(client, enabled: false);
+    using (var raw = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://httpbin.org/redirect/2")))
+    {
+        Console.WriteLine($"AllowAutoRedirect=false -> status {(int)raw.StatusCode} (Location: {raw.Headers.Location})");
+    }
+
+    // Re-enable and follow the whole chain, picking up cookies along the way.
+    ChangeRedirectionState(client, enabled: true);
+    using (var followed = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://httpbin.org/cookies/set?demo=jahttpclient")))
+    {
+        Console.WriteLine($"AllowAutoRedirect=true  -> final URL {followed.RequestMessage?.RequestUri}");
+    }
+
+    // Export every cookie observed this session (browser-extension JSON shape).
+    var json = client.Cookies.GetCookiesJson(indented: true);
+    Console.WriteLine("Exported cookies (client.Cookies.GetCookiesJson):");
+    Console.WriteLine(json);
+    Console.WriteLine();
+}
+
+// The on-the-fly redirect switch requested in the task: no client rebuild needed.
+static void ChangeRedirectionState(ChromeHttpClient client, bool enabled) => client.AllowAutoRedirect = enabled;
 
 // Drop-in replacement for the user's existing helper, now running over the
 // browser-impersonating client. Same tuple shape; uses HttpRequestMessage /

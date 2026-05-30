@@ -36,6 +36,11 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
     private readonly SemaphoreSlim? _throttle;
     private readonly Dictionary<string, string> _defaultHeaders;
 
+    // Live redirect policy, seeded from options but mutable at runtime so callers
+    // can toggle redirect following between requests.
+    private volatile bool _allowAutoRedirect;
+    private int _maxAutomaticRedirections;
+
     private int _seeded;
     private bool _disposed;
 
@@ -56,6 +61,8 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         _sessionId = Guid.NewGuid().ToString("N");
         _cookies = new ChromeCookieContainer(_sessionId);
         _defaultHeaders = new Dictionary<string, string>(_options.DefaultHeaders, StringComparer.OrdinalIgnoreCase);
+        _allowAutoRedirect = _options.AllowAutoRedirect;
+        _maxAutomaticRedirections = _options.MaxAutomaticRedirections;
 
         if (_options.MaxConcurrency > 0)
         {
@@ -68,6 +75,24 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
 
     /// <inheritdoc />
     public override IDictionary<string, string> DefaultRequestHeaders => _defaultHeaders;
+
+    /// <inheritdoc />
+    public override bool AllowAutoRedirect
+    {
+        get => _allowAutoRedirect;
+        set => _allowAutoRedirect = value;
+    }
+
+    /// <inheritdoc />
+    public override int MaxAutomaticRedirections
+    {
+        get => Volatile.Read(ref _maxAutomaticRedirections);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            Volatile.Write(ref _maxAutomaticRedirections, value);
+        }
+    }
 
     /// <inheritdoc />
     public override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
@@ -91,6 +116,11 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         {
             var payload = BuildPayload(method, currentUri, orderedHeaders, body, isByteBody);
             var response = await ExecuteAsync(payload, cancellationToken).ConfigureAwait(false);
+
+            // Mirror this hop's Set-Cookie headers so Cookies.GetCookiesJson() can
+            // export full metadata even though the native jar only reads back
+            // name→value pairs.
+            _cookies.CaptureResponseCookies(currentUri, response.Headers);
 
             var location = ExtractLocation(response);
             if (location is not null &&
@@ -281,7 +311,7 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
 
     private bool ShouldRedirect(int status, int redirects)
     {
-        if (!_options.AllowAutoRedirect || redirects >= _options.MaxAutomaticRedirections)
+        if (!_allowAutoRedirect || redirects >= Volatile.Read(ref _maxAutomaticRedirections))
         {
             return false;
         }

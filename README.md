@@ -95,6 +95,17 @@ API намеренно повторяет `HttpClient` (`HttpRequestMessage`,
 
 Куки между хопами переносятся автоматически (один нативный jar на сессию).
 
+Опции `AllowAutoRedirect` / `MaxAutomaticRedirections` задают **стартовую**
+политику, но их можно менять **на ходу** прямо на клиенте (live-переключатель
+между запросами):
+
+```csharp
+private void ChangeRedirectionState(bool enabled) => client.AllowAutoRedirect = enabled;
+
+client.AllowAutoRedirect = false;     // следующий запрос вернёт первый 3xx как есть
+client.MaxAutomaticRedirections = 5;  // ограничить длину цепочки
+```
+
 ### Куки
 
 - Серверные куки (`_abck`, `ak_bmsc`, `bm_sz`, `cf_clearance`) персистятся
@@ -103,6 +114,12 @@ API намеренно повторяет `HttpClient` (`HttpRequestMessage`,
   `client.Cookies.AddRaw(url, "a=1; b=2")`, `client.Cookies.Import(url, cookieContainer)`.
   При совпадении имени пользовательская кука перекрывает серверную.
 - Чтение: `client.Cookies.GetCookies(url)`.
+- **Сохранение/экспорт**: `client.Cookies.GetCookiesJson()` сериализует все
+  накопленные за сессию куки (со всех доменов) в JSON в формате браузерных
+  расширений (Cookie-Editor / EditThisCookie) — можно сохранить в файл и позже
+  переимпортировать. `GetCookiesJson(url)` — только куки для конкретного URL,
+  `GetCookiesJson(indented: true)` — с отступами. Метаданные (домен, путь, срок,
+  `Secure`, `HttpOnly`) восстанавливаются из заголовков `Set-Cookie` ответов.
 
 ### Многопоточность и прокси
 

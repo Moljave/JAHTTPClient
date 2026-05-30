@@ -22,6 +22,20 @@ public abstract class ChromeHttpClient : IDisposable, IAsyncDisposable
     public abstract IDictionary<string, string> DefaultRequestHeaders { get; }
 
     /// <summary>
+    /// Whether HTTP redirects are followed automatically. Unlike the option of
+    /// the same name (read once at construction), this is a live switch: flip it
+    /// between requests to enable/disable redirect following on the fly, e.g.
+    /// <c>client.AllowAutoRedirect = false;</c> to capture a raw 3xx response.
+    /// </summary>
+    public abstract bool AllowAutoRedirect { get; set; }
+
+    /// <summary>
+    /// Maximum number of redirects followed when <see cref="AllowAutoRedirect"/>
+    /// is enabled. Adjustable at any time. Must be zero or positive.
+    /// </summary>
+    public abstract int MaxAutomaticRedirections { get; set; }
+
+    /// <summary>
     /// Sends an HTTP request and returns the response, honoring the configured
     /// redirect policy. This is the single primitive every other helper builds on.
     /// </summary>
