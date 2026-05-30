@@ -179,11 +179,20 @@ static async Task DemonstrateCookieExportAndRedirectToggleAsync()
     var json = client.Cookies.GetCookiesJson(indented: true);
     Console.WriteLine("Exported cookies (client.Cookies.GetCookiesJson):");
     Console.WriteLine(json);
+
+    // Hot-swap the egress proxy at runtime (cookies/session are preserved).
+    ChangeProxy(client, "http://user:pass@proxy.example.com:8000");
+    Console.WriteLine($"Proxy after SetProxy : {client.Proxy}");
+    ChangeProxy(client, null); // back to direct egress
+    Console.WriteLine($"Proxy after reset    : {client.Proxy ?? "(direct)"}");
     Console.WriteLine();
 }
 
 // The on-the-fly redirect switch requested in the task: no client rebuild needed.
 static void ChangeRedirectionState(ChromeHttpClient client, bool enabled) => client.AllowAutoRedirect = enabled;
+
+// Hot-swap the proxy at runtime: client.SetProxy(...). Pass null to go direct.
+static void ChangeProxy(ChromeHttpClient client, string? proxyUrl) => client.SetProxy(proxyUrl);
 
 // Drop-in replacement for the user's existing helper, now running over the
 // browser-impersonating client. Same tuple shape; uses HttpRequestMessage /

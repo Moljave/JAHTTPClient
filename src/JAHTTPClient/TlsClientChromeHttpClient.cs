@@ -52,6 +52,11 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
     private volatile bool _allowAutoRedirect;
     private int _maxAutomaticRedirections;
 
+    // Live egress, seeded from options but hot-swappable at runtime. The native
+    // tls-client re-points the session's transport when the proxy URL changes.
+    private volatile string? _proxy;
+    private volatile bool _rotatingProxy;
+
     private int _seeded;
     private bool _disposed;
 
@@ -74,6 +79,8 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         _defaultHeaders = new Dictionary<string, string>(_options.DefaultHeaders, StringComparer.OrdinalIgnoreCase);
         _allowAutoRedirect = _options.AllowAutoRedirect;
         _maxAutomaticRedirections = _options.MaxAutomaticRedirections;
+        _proxy = string.IsNullOrWhiteSpace(_options.Proxy) ? null : _options.Proxy;
+        _rotatingProxy = _options.RotatingProxy;
 
         if (_options.MaxConcurrency > 0)
         {
@@ -102,6 +109,29 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
             Volatile.Write(ref _maxAutomaticRedirections, value);
+        }
+    }
+
+    /// <inheritdoc />
+    public override string? Proxy => _proxy;
+
+    /// <inheritdoc />
+    public override void SetProxy(string? proxyUrl, bool? rotating = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var normalized = string.IsNullOrWhiteSpace(proxyUrl) ? null : proxyUrl.Trim();
+        if (normalized is not null && !Uri.TryCreate(normalized, UriKind.Absolute, out _))
+        {
+            throw new ArgumentException(
+                $"Proxy must be an absolute URI like \"http://user:pass@host:port\" or \"socks5://host:port\" (got: \"{proxyUrl}\").",
+                nameof(proxyUrl));
+        }
+
+        _proxy = normalized;
+        if (rotating is { } r)
+        {
+            _rotatingProxy = r;
         }
     }
 
@@ -180,12 +210,12 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             WithRandomTlsExtensionOrder = _options.EnableJa3Fingerprinting,
             ForceHttp1 = _options.ForceHttp1,
             TimeoutMilliseconds = (int)Math.Clamp(_options.Timeout.TotalMilliseconds, 1, int.MaxValue),
-            ProxyUrl = _options.Proxy,
-            IsRotatingProxy = _options.RotatingProxy,
+            ProxyUrl = _proxy,
+            IsRotatingProxy = _rotatingProxy,
             // Pooled keep-alive connections are bound to one proxy exit IP; reusing
             // one after a rotating proxy rotates yields EOF. Disable pooling so each
             // request dials fresh. Defaults on for rotating proxies, overridable.
-            TransportOptions = (_options.DisableConnectionReuse ?? _options.RotatingProxy)
+            TransportOptions = (_options.DisableConnectionReuse ?? _rotatingProxy)
                 ? new TransportOptions { DisableKeepAlives = true }
                 : null,
         };

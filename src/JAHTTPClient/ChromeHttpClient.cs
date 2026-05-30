@@ -35,6 +35,29 @@ public abstract class ChromeHttpClient : IDisposable, IAsyncDisposable
     /// </summary>
     public abstract int MaxAutomaticRedirections { get; set; }
 
+    /// <summary>The egress proxy currently in effect, or <see langword="null"/> for direct egress.</summary>
+    public abstract string? Proxy { get; }
+
+    /// <summary>
+    /// Hot-swaps the egress proxy for all subsequent requests. Pass
+    /// <see langword="null"/> or empty to go direct. Optionally update the
+    /// rotating-proxy hint at the same time (leave <see langword="null"/> to keep
+    /// the current setting).
+    /// </summary>
+    /// <param name="proxyUrl">
+    /// Absolute proxy URI, e.g. <c>http://user:pass@host:port</c> or
+    /// <c>socks5://host:port</c>; <see langword="null"/>/empty = direct.
+    /// </param>
+    /// <param name="rotating">
+    /// When provided, updates whether the proxy rotates its exit IP per request
+    /// (affects connection-reuse handling).
+    /// </param>
+    /// <remarks>
+    /// The swap applies from the next request onward and is safe to call while
+    /// other requests are in flight.
+    /// </remarks>
+    public abstract void SetProxy(string? proxyUrl, bool? rotating = null);
+
     /// <summary>
     /// Sends an HTTP request and returns the response, honoring the configured
     /// redirect policy. This is the single primitive every other helper builds on.
