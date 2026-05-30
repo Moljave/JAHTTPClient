@@ -333,7 +333,16 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
     private static HttpResponseMessage BuildResponse(
         TlsResponsePayload payload, HttpRequestMessage original, HttpMethod finalMethod, Uri finalUri)
     {
-        var response = new HttpResponseMessage((HttpStatusCode)payload.Status);
+        var response = new HttpResponseMessage((HttpStatusCode)payload.Status)
+        {
+            // Surface the protocol that was actually negotiated (h2 vs http/1.1).
+            Version = payload.UsedProtocol switch
+            {
+                "h2" or "HTTP/2.0" or "2" => System.Net.HttpVersion.Version20,
+                "http/1.1" or "HTTP/1.1" or "1.1" => System.Net.HttpVersion.Version11,
+                _ => System.Net.HttpVersion.Unknown,
+            },
+        };
 
         var (bytes, dataUriMediaType) = DecodeBody(payload.Body);
         response.Content = new ByteArrayContent(bytes);

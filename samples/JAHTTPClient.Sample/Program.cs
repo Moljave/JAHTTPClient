@@ -225,6 +225,10 @@ static async Task ProbeTargetAsync(string url)
             {
                 EnableJa3Fingerprinting = true,
                 FingerprintPreset = Ja3Preset.Chrome,
+                // Chrome-JA3 over HTTP/1.1 is the configuration proven to pass
+                // Akamai on kleinanzeigen (the reference uTLS test forces h1 to
+                // avoid the extra HTTP/2 fingerprint vector). Drop this to use h2.
+                ForceHttp1 = true,
                 AllowAutoRedirect = redirect,
                 MaxAutomaticRedirections = max,
                 Timeout = TimeSpan.FromSeconds(30),
