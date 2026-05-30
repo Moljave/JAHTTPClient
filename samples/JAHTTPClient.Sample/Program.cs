@@ -34,7 +34,10 @@ if (args.Length > 0 && args[0] == "--load")
 // 1) ---- Verify the TLS fingerprint against scrapfly --------------------------
 await VerifyFingerprintAsync();
 
-// 2) ---- Demonstrate the HttpClient-style migration helper --------------------
+// 2) ---- Verify a real Akamai-protected target (kleinanzeigen login) ----------
+await VerifyKleinanzeigenAsync();
+
+// 3) ---- Demonstrate the HttpClient-style migration helper --------------------
 await DemonstrateExecuteShortWebRequestAsync();
 
 return;
@@ -61,6 +64,62 @@ static async Task VerifyFingerprintAsync()
     Console.WriteLine($"Final URL  : {response.RequestMessage?.RequestUri}");
     Console.WriteLine($"Body       : {json}");
     Console.WriteLine("Compare the reported ja3 with a real Chrome 148 fingerprint.");
+    Console.WriteLine();
+}
+
+// Hits the Akamai-protected kleinanzeigen login (SSO) endpoint with the proven
+// configuration (Chrome JA3 + HTTP/1.1) and follows the redirect chain. On a
+// clean IP this lands on https://login.kleinanzeigen.de/.../identifier (200);
+// a 403 "IP-Bereich gesperrt" means the TLS fingerprint or the IP was rejected.
+static async Task VerifyKleinanzeigenAsync()
+{
+    const string url = "https://www.kleinanzeigen.de/m-einloggen-sso.html";
+    Console.WriteLine("== Kleinanzeigen login check (Akamai) ==");
+
+    using var client = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
+    {
+        EnableJa3Fingerprinting = true,
+        FingerprintPreset = Ja3Preset.Chrome,
+        ForceHttp1 = true,               // Chrome-JA3 over HTTP/1.1 is the proven config
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 15,
+        Timeout = TimeSpan.FromSeconds(30),
+        // Proxy = "http://user:pass@host:port", // use a clean/residential proxy if your IP is flagged
+    });
+
+    using var request = new HttpRequestMessage(HttpMethod.Get, url);
+    request.Headers.TryAddWithoutValidation("Accept",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
+    request.Headers.TryAddWithoutValidation("Accept-Language", "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7");
+    request.Headers.TryAddWithoutValidation("Accept-Encoding", "gzip, deflate, br, zstd");
+    request.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+    request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "none");
+    request.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "navigate");
+    request.Headers.TryAddWithoutValidation("Sec-Fetch-User", "?1");
+    request.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
+
+    try
+    {
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? string.Empty;
+        var reachedLogin = finalUrl.Contains("login.kleinanzeigen.de", StringComparison.OrdinalIgnoreCase);
+        var banned = (int)response.StatusCode is 403 or 429 or 503
+                     || body.Contains("IP-Bereich", StringComparison.OrdinalIgnoreCase)
+                     || body.Contains("gesperrt", StringComparison.OrdinalIgnoreCase);
+
+        Console.WriteLine($"Status     : {(int)response.StatusCode} {response.StatusCode}  (HTTP/{response.Version})");
+        Console.WriteLine($"Final URL  : {finalUrl}");
+        Console.WriteLine($"Body len   : {body.Length}");
+        Console.WriteLine(reachedLogin ? "Verdict    : ✅ PASSED (reached login.kleinanzeigen.de)"
+                         : banned       ? "Verdict    : ❌ BLOCKED (IP-ban / fingerprint rejected)"
+                                        : "Verdict    : ⚠️ inconclusive");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Verdict    : 💥 {ex.GetType().Name}: {ex.Message}");
+    }
+
     Console.WriteLine();
 }
 
