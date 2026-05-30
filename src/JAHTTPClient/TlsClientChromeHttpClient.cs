@@ -126,7 +126,7 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         while (true)
         {
             var payload = BuildPayload(method, currentUri, orderedHeaders, body, isByteBody);
-            var response = await ExecuteAsync(payload, cancellationToken).ConfigureAwait(false);
+            var response = await ExecuteWithRetryAsync(payload, cancellationToken).ConfigureAwait(false);
 
             // Mirror this hop's Set-Cookie headers so Cookies.GetCookiesJson() can
             // export full metadata even though the native jar only reads back
@@ -182,6 +182,12 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             TimeoutMilliseconds = (int)Math.Clamp(_options.Timeout.TotalMilliseconds, 1, int.MaxValue),
             ProxyUrl = _options.Proxy,
             IsRotatingProxy = _options.RotatingProxy,
+            // Pooled keep-alive connections are bound to one proxy exit IP; reusing
+            // one after a rotating proxy rotates yields EOF. Disable pooling so each
+            // request dials fresh. Defaults on for rotating proxies, overridable.
+            TransportOptions = (_options.DisableConnectionReuse ?? _options.RotatingProxy)
+                ? new TransportOptions { DisableKeepAlives = true }
+                : null,
         };
     }
 
@@ -402,6 +408,56 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
     }
 
     // ---- native execution --------------------------------------------------
+
+    /// <summary>
+    /// Runs one hop, transparently retrying transport-level failures (no HTTP
+    /// response received — DNS/connect/proxy drop/EOF/timeout) up to
+    /// <see cref="ChromeHttpClientOptions.MaxRetries"/> times with jittered
+    /// backoff. A genuine HTTP response (any status) is returned immediately;
+    /// exhausted transport failures surface as <see cref="HttpRequestException"/>.
+    /// </summary>
+    private async Task<TlsResponsePayload> ExecuteWithRetryAsync(TlsRequestPayload payload, CancellationToken ct)
+    {
+        var maxAttempts = Math.Max(1, _options.MaxRetries + 1);
+        TlsResponsePayload response = null!;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            response = await ExecuteAsync(payload, ct).ConfigureAwait(false);
+
+            if (!IsTransportFailure(response))
+            {
+                return response;
+            }
+
+            if (attempt < maxAttempts)
+            {
+                // Re-dialing usually lands on a fresh rotating-proxy exit IP, which
+                // clears the transient connection drop.
+                await Task.Delay(RetryBackoff(attempt), ct).ConfigureAwait(false);
+            }
+        }
+
+        throw new HttpRequestException(TransportErrorMessage(response));
+    }
+
+    // tls-client reports a pre-response failure (DNS/connect/proxy/EOF/timeout) as
+    // status 0 with the Go error text in the body and no headers; a real HTTP
+    // exchange always carries a non-zero status.
+    private static bool IsTransportFailure(TlsResponsePayload response) => response.Status == 0;
+
+    private static string TransportErrorMessage(TlsResponsePayload response)
+        => string.IsNullOrWhiteSpace(response.Body)
+            ? "The native tls-client transport failed before receiving a response."
+            : response.Body!.Trim();
+
+    private static TimeSpan RetryBackoff(int attempt)
+    {
+        // Exponential backoff with jitter so a burst of concurrent failures (a
+        // saturated rotating proxy) doesn't retry in lockstep.
+        var baseMs = 50 * (1 << Math.Min(attempt - 1, 5)); // 50,100,200,…,1600 cap
+        return TimeSpan.FromMilliseconds(baseMs + Random.Shared.Next(0, baseMs / 2 + 1));
+    }
 
     private async Task<TlsResponsePayload> ExecuteAsync(TlsRequestPayload payload, CancellationToken ct)
     {

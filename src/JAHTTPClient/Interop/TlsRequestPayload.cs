@@ -88,4 +88,9 @@ public sealed class TlsRequestPayload
     [JsonPropertyName("isRotatingProxy")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsRotatingProxy { get; set; }
+
+    /// <summary>Connection-pool tuning. Null = leave the native defaults in place.</summary>
+    [JsonPropertyName("transportOptions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TransportOptions? TransportOptions { get; set; }
 }

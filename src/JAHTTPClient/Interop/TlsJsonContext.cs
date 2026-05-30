@@ -15,6 +15,7 @@ namespace JAHTTPClient.Interop;
     GenerationMode = JsonSourceGenerationMode.Default)]
 [JsonSerializable(typeof(TlsRequestPayload))]
 [JsonSerializable(typeof(TlsResponsePayload))]
+[JsonSerializable(typeof(TransportOptions))]
 [JsonSerializable(typeof(CustomTlsClient))]
 [JsonSerializable(typeof(TlsCookie))]
 [JsonSerializable(typeof(SessionCookiesPayload))]

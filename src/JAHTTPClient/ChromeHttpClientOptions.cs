@@ -42,6 +42,34 @@ public sealed class ChromeHttpClientOptions
     /// <summary>Hint that <see cref="Proxy"/> rotates the exit IP per request.</summary>
     public bool RotatingProxy { get; set; }
 
+    /// <summary>
+    /// Disable HTTP keep-alive connection pooling (a fresh connection is dialed
+    /// per request). <see langword="null"/> (default) means "auto": pooling is
+    /// disabled automatically when <see cref="RotatingProxy"/> is set.
+    /// </summary>
+    /// <remarks>
+    /// Pooled keep-alive connections are pinned to one proxy exit IP. When a
+    /// rotating proxy rotates, a reused connection is already dead, so the next
+    /// request fails with <c>EOF</c> — exactly the failure seen under heavy
+    /// concurrency. Disabling reuse trades a little throughput for reliability.
+    /// Set explicitly to <see langword="false"/> to keep pooling even with a
+    /// rotating proxy (e.g. a sticky-session gateway).
+    /// </remarks>
+    public bool? DisableConnectionReuse { get; set; }
+
+    /// <summary>
+    /// How many times to transparently retry a request that fails at the
+    /// transport level (no HTTP response received: DNS/connect/proxy drop/EOF/
+    /// timeout) before surfacing the failure as <see cref="System.Net.Http.HttpRequestException"/>.
+    /// Retries use exponential backoff with jitter; with a rotating proxy each
+    /// retry re-dials a fresh exit IP. Defaults to 2. Set to 0 to disable.
+    /// </summary>
+    /// <remarks>
+    /// Only transport failures are retried — a real HTTP response (including 4xx
+    /// or 5xx) is always returned as-is and never retried.
+    /// </remarks>
+    public int MaxRetries { get; set; } = 2;
+
     /// <summary>Per-request timeout. Defaults to 100 seconds (same as <see cref="System.Net.Http.HttpClient"/>).</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(100);
 
