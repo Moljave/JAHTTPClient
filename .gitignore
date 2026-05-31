@@ -16,6 +16,10 @@ src/JAHTTPClient/runtimes/**/*.so
 src/JAHTTPClient/runtimes/**/*.dylib
 src/JAHTTPClient/runtimes/**/*.h
 
+# Exception: the prebuilt linux-x64 native library is committed on purpose so the
+# library runs out of the box on linux-x64 without a local Go/CGO build.
+!src/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
+
 # Go
 native/go.sum
 
