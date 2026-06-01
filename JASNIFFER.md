@@ -47,8 +47,12 @@ cd native ; ./build-windows.ps1
 
 ### 2. Запуск
 
+Снифер — **отдельное решение** `JASniffer.sln` (исходники в каталоге `sniffer/`),
+которое ссылается на движок `src/JAHTTPClient`. Сборка/запуск:
+
 ```bash
-dotnet run -c Release --project src/JASniffer.Web
+dotnet build -c Release JASniffer.sln                       # при желании собрать всё решение
+dotnet run   -c Release --project sniffer/JASniffer.Web     # поднять снифер
 ```
 
 Поднимутся **оба** сервиса в одном процессе:
@@ -187,13 +191,18 @@ TCP/TLS‑туннелем: браузер продолжает работать
 
 ## Структура решения
 
+Снифер вынесен в отдельный каталог `sniffer/` и собственное решение
+`JASniffer.sln`; движок `src/JAHTTPClient` подключается по `ProjectReference` и
+остаётся частью своего `JAHTTPClient.sln`.
+
 ```
+JASniffer.sln            отдельное решение снифера (3 проекта + движок JAHTTPClient)
 src/JAHTTPClient/        существующий движок (Chrome JA3). Минимальное добавление: опция WithoutCookieJar.
-src/JASniffer.Core/      модели сессий, SessionStore, генерация/кэш сертификатов (CertificateAuthority),
+sniffer/JASniffer.Core/  модели сессий, SessionStore, генерация/кэш сертификатов (CertificateAuthority),
                          разбор (params/cookies/auth), экспорт .saz (SazExporter), настройки.
-src/JASniffer.Proxy/     TcpListener :8866, разбор HTTP/CONNECT (Http1Reader/Http1Request),
+sniffer/JASniffer.Proxy/ TcpListener :8866, разбор HTTP/CONNECT (Http1Reader/Http1Request),
                          TLS‑as‑server, ретрансляция через JAHTTPClient (UpstreamRelay), сырой туннель.
-src/JASniffer.Web/       ASP.NET Core хост: статика wwwroot (SPA), REST API, SignalR hub,
+sniffer/JASniffer.Web/   ASP.NET Core хост: статика wwwroot (SPA), REST API, SignalR hub,
                          прокси как hosted‑service. Стартовый проект.
 ```
 

@@ -7,8 +7,9 @@
 
 > 🕵️ **JASniffer** — построенный поверх этого движка отладочный HTTPS-снифер
 > (аналог Fiddler Everywhere) с веб-интерфейсом: ловит трафик браузера и
-> переотправляет его наверх с отпечатком Chrome 148. Запуск:
-> `dotnet run -c Release --project src/JASniffer.Web`. Подробности —
+> переотправляет его наверх с отпечатком Chrome 148. Это **отдельный проект**
+> (своё решение `JASniffer.sln`, исходники в каталоге [`sniffer/`](sniffer/)).
+> Запуск: `dotnet run -c Release --project sniffer/JASniffer.Web`. Подробности —
 > [**JASNIFFER.md**](JASNIFFER.md).
 
 ## Почему не `SslStream` / `SocketsHttpHandler`
