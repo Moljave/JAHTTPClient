@@ -19,7 +19,8 @@
     <div class="toolbar-actions">
       <button id="btnClear" class="btn" title="Clear the session list">Clear</button>
       <button id="btnExport" class="btn" title="Export sessions to a Fiddler .saz archive">Export .saz</button>
-      <button id="btnCa" class="btn" title="Download the root CA to install as trusted">Download CA</button>
+      <button id="btnInstallCa" class="btn" title="Install the root CA into the OS trusted-root store automatically (Windows)">Install CA</button>
+      <button id="btnCa" class="btn" title="Download the root CA to install manually (e.g. Firefox)">Download CA</button>
 
       <div class="seg-group" title="System = OS-wide proxy (all traffic, Windows). Manual = capture only what you point at 127.0.0.1:8866.">
         <span class="seg-title">Mode</span>
@@ -115,10 +116,13 @@
     <div class="hint-card">
       <h3>Install the root CA to decrypt HTTPS</h3>
       <p>JASniffer signs per-site certificates with its own root CA. Until you trust it,
-         HTTPS sites will warn. Download the CA and add it to your OS/browser trust store, then set
-         your proxy to <code>127.0.0.1:<span id="hintPort">8866</span></code>.</p>
+         HTTPS sites will warn. On Windows just press <b>Install CA</b> (one-time consent
+         prompt, no admin) — Chrome/Edge will trust it. Firefox uses its own store: use
+         <b>Download CA</b> and import it. Then choose <b>System</b> mode or point your app at
+         <code>127.0.0.1:<span id="hintPort">8866</span></code>.</p>
       <p class="muted" id="caStore"></p>
       <div class="hint-actions">
+        <button class="btn" id="hintInstallCa">Install CA automatically</button>
         <button class="btn" id="hintDownloadCa">Download CA (.cer)</button>
         <button class="btn ghost" id="hintClose">Got it</button>
       </div>

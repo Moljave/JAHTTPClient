@@ -28,36 +28,73 @@ public sealed class ProxyServer(
     /// <summary>Runs the accept loop until <paramref name="ct"/> is cancelled.</summary>
     public async Task RunAsync(CancellationToken ct)
     {
-        var listener = new TcpListener(Address, Port);
-        listener.Start();
-        logger.LogInformation("JASniffer proxy listening on {Address}:{Port}", Address, Port);
+        // Bind both loopback families so apps reach the proxy whether they resolve
+        // 127.0.0.1 (IPv4) or ::1 (IPv6, what "localhost" often becomes on Windows).
+        var addresses = Address.Equals(IPAddress.Loopback)
+            ? new[] { IPAddress.Loopback, IPAddress.IPv6Loopback }
+            : [Address];
+
+        var listeners = new List<TcpListener>();
+        foreach (var address in addresses)
+        {
+            try
+            {
+                var listener = new TcpListener(address, Port);
+                listener.Start();
+                listeners.Add(listener);
+                logger.LogInformation("JASniffer proxy listening on {Address}:{Port}", address, Port);
+            }
+            catch (SocketException ex)
+            {
+                logger.LogWarning(ex, "Could not bind {Address}:{Port}; trying the others.", address, Port);
+            }
+        }
+
+        if (listeners.Count == 0)
+        {
+            logger.LogError("JASniffer proxy could not bind port {Port} on any loopback address.", Port);
+            return;
+        }
 
         try
         {
-            while (!ct.IsCancellationRequested)
-            {
-                TcpClient client;
-                try
-                {
-                    client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (SocketException ex)
-                {
-                    logger.LogDebug(ex, "Accept failed; continuing.");
-                    continue;
-                }
-
-                _ = HandleAsync(client, ct);
-            }
+            await Task.WhenAll(listeners.Select(l => AcceptLoopAsync(l, ct))).ConfigureAwait(false);
         }
         finally
         {
-            listener.Stop();
+            foreach (var listener in listeners)
+            {
+                listener.Stop();
+            }
+
             logger.LogInformation("JASniffer proxy stopped.");
+        }
+    }
+
+    private async Task AcceptLoopAsync(TcpListener listener, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            TcpClient client;
+            try
+            {
+                client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
+            catch (SocketException ex)
+            {
+                logger.LogDebug(ex, "Accept failed; continuing.");
+                continue;
+            }
+
+            _ = HandleAsync(client, ct);
         }
     }
 

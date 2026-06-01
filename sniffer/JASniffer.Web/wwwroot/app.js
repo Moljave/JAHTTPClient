@@ -375,6 +375,14 @@
     });
     $("#btnCa").addEventListener("click", () => window.open("/api/ca.cer", "_blank"));
     $("#hintDownloadCa").addEventListener("click", () => window.open("/api/ca.cer", "_blank"));
+    const installCa = async () => {
+      try {
+        const r = await api("/api/install-ca", { method: "POST" });
+        alert(r.message || (r.ok ? "CA установлен." : "Не удалось установить CA."));
+      } catch { alert("Не удалось обратиться к эндпоинту установки CA."); }
+    };
+    $("#btnInstallCa").addEventListener("click", installCa);
+    $("#hintInstallCa").addEventListener("click", installCa);
     $("#hintClose").addEventListener("click", () => { $("#caHint").classList.add("hidden"); localStorage.setItem("ca-dismissed", "1"); });
 
     $("#tglRedirects").addEventListener("change", saveSettings);

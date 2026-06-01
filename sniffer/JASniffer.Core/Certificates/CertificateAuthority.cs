@@ -62,6 +62,37 @@ public sealed class CertificateAuthority
     public byte[] ExportCaCertificateDer() => _caCertificate.Export(X509ContentType.Cert);
 
     /// <summary>
+    /// Installs the root CA (public part only) into the current user's Trusted Root
+    /// store so OS-store browsers (Chrome/Edge) trust intercepted HTTPS without a
+    /// manual import. On Windows this shows a one-time consent prompt and needs no
+    /// admin rights; Firefox keeps its own store and still needs a manual import.
+    /// </summary>
+    public (bool Ok, string Message) InstallToUserTrustStore()
+    {
+        try
+        {
+            // Add only the public certificate — never the CA private key.
+            using var publicOnly = X509CertificateLoader.LoadCertificate(_caCertificate.Export(X509ContentType.Cert));
+            using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+            store.Open(OpenFlags.ReadWrite);
+
+            if (store.Certificates.Find(X509FindType.FindByThumbprint, publicOnly.Thumbprint, validOnly: false).Count == 0)
+            {
+                store.Add(publicOnly);
+            }
+
+            store.Close();
+            return (true, OperatingSystem.IsWindows()
+                ? "Root CA установлен в хранилище «Доверенные корневые» текущего пользователя. Если сайт всё ещё ругается — перезапустите браузер."
+                : "Root CA добавлен в пользовательское хранилище. Некоторым приложениям/браузерам может потребоваться ручной импорт.");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Не удалось установить CA автоматически: {ex.Message}. Используйте «Download CA» и импортируйте вручную.");
+        }
+    }
+
+    /// <summary>
     /// Returns (minting and caching on first use) a leaf certificate with private
     /// key for <paramref name="host"/>, ready to hand to
     /// <see cref="System.Net.Security.SslStream"/> as the server certificate.

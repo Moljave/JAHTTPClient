@@ -178,13 +178,33 @@ internal sealed class ProxyConnection(
 
     private async Task ExchangeAsync(Stream clientStream, ProxyRequest request, CancellationToken ct)
     {
+        // Relay (so the UI keeps working) but don't record the tool's own traffic.
+        var capture = !IsSelfUi(request.Host, request.Port);
         var session = NewSession(request);
-        store.Add(session);
+        if (capture)
+        {
+            store.Add(session);
+        }
 
         var result = await relay.RelayAsync(request, session, ct).ConfigureAwait(false);
-        store.Update(session);
+        if (capture)
+        {
+            store.Update(session);
+        }
 
         await WireResponse.WriteAsync(clientStream, result, keepAlive: !request.WantsClose, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>True for loopback traffic to the sniffer's own UI port — proxied, never recorded.</summary>
+    private bool IsSelfUi(string host, int port)
+    {
+        if (settings.SelfUiPort == 0 || port != settings.SelfUiPort)
+        {
+            return false;
+        }
+
+        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || (IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip));
     }
 
     private CapturedSession NewSession(ProxyRequest request)
@@ -214,8 +234,12 @@ internal sealed class ProxyConnection(
 
     private async Task TunnelPlainAsync(Stream clientStream, Http1Reader reader, ProxyRequest request, CancellationToken ct)
     {
+        var capture = !IsSelfUi(request.Host, request.Port);
         var session = NewTunnelSession(request.Method, request.Host, request.Port, request.Scheme, request.Url);
-        store.Add(session);
+        if (capture)
+        {
+            store.Add(session);
+        }
 
         try
         {
@@ -239,15 +263,22 @@ internal sealed class ProxyConnection(
         finally
         {
             session.Completed = true;
-            store.Update(session);
+            if (capture)
+            {
+                store.Update(session);
+            }
         }
     }
 
     private async Task TunnelRawAsync(Stream clientStream, Http1Reader reader, string host, int port, string method, CancellationToken ct)
     {
         var url = $"{host}:{port}";
+        var capture = !IsSelfUi(host, port);
         var session = NewTunnelSession(method, host, port, "tunnel", url);
-        store.Add(session);
+        if (capture)
+        {
+            store.Add(session);
+        }
 
         try
         {
@@ -270,14 +301,21 @@ internal sealed class ProxyConnection(
         finally
         {
             session.Completed = true;
-            store.Update(session);
+            if (capture)
+            {
+                store.Update(session);
+            }
         }
     }
 
     private async Task TunnelTlsAsync(SslStream clientTls, Http1Reader reader, ProxyRequest request, string host, int port, CancellationToken ct)
     {
+        var capture = !IsSelfUi(host, port);
         var session = NewTunnelSession(request.Method, host, port, "https", request.Url);
-        store.Add(session);
+        if (capture)
+        {
+            store.Add(session);
+        }
 
         try
         {
@@ -311,7 +349,10 @@ internal sealed class ProxyConnection(
         finally
         {
             session.Completed = true;
-            store.Update(session);
+            if (capture)
+            {
+                store.Update(session);
+            }
         }
     }
 

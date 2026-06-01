@@ -55,4 +55,12 @@ public sealed class SnifferSettings
 
     /// <summary>Upper bound on the number of sessions kept in the in-memory ring.</summary>
     public int MaxSessions { get; init; } = 20_000;
+
+    /// <summary>
+    /// The sniffer's own UI port. Loopback traffic to this port (the SPA, its REST
+    /// calls and the SignalR socket) is proxied transparently but never recorded,
+    /// so the session list isn't flooded with the tool's own localhost requests
+    /// when the system proxy doesn't bypass loopback.
+    /// </summary>
+    public int SelfUiPort { get; init; }
 }

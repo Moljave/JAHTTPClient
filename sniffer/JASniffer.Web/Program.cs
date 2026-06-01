@@ -16,7 +16,7 @@ var caDir = builder.Configuration.GetValue<string?>("JASniffer:CaDirectory", nul
 builder.WebHost.UseUrls($"http://localhost:{uiPort}");
 
 // ---- services --------------------------------------------------------------
-var settings = new SnifferSettings();
+var settings = new SnifferSettings { SelfUiPort = uiPort };
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<SessionStore>();
 builder.Services.AddSingleton(CertificateAuthority.LoadOrCreate(caDir));
@@ -103,6 +103,12 @@ api.MapPost("/clear", (SessionStore store) =>
 
 api.MapGet("/ca.cer", (CertificateAuthority ca) =>
     Results.File(ca.ExportCaCertificateDer(), "application/x-x509-ca-cert", "JASniffer-rootCA.cer"));
+
+api.MapPost("/install-ca", (CertificateAuthority ca) =>
+{
+    var (ok, message) = ca.InstallToUserTrustStore();
+    return Results.Ok(new { ok, message });
+});
 
 api.MapGet("/export.saz", (string? ids, SessionStore store) =>
 {
