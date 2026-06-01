@@ -392,6 +392,7 @@
     $("#tglUdp").addEventListener("change", onUdpToggle);
     $("#selPreset").addEventListener("change", saveSettings);
     $("#tglForceHttp1").addEventListener("change", saveSettings);
+    $("#btnSelftest").addEventListener("click", runSelfTest);
 
     $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
     $("#settingsClose").addEventListener("click", () => closeModal("settingsModal"));
@@ -421,6 +422,21 @@
     await api("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(dto) });
     const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
     $("#presetLabel").textContent = label;
+  }
+
+  async function runSelfTest() {
+    const out = $("#selftestOut");
+    out.textContent = "Снимаю реальный ClientHello локально…";
+    try {
+      const r = await api("/api/fingerprint-selftest");
+      if (!r.ok) { out.textContent = "⚠ " + (r.error || "не удалось"); return; }
+      const real = r.tls13 && r.keyShare; // real browsers offer TLS 1.3 + key_share; TLS-inspectors typically don't
+      out.innerHTML =
+        `${real ? "✅" : "⚠"} <b>${escapeHtml(r.preset)}</b> · TLS1.3=${r.tls13} · key_share=${r.keyShare} · GREASE=${r.grease} · ` +
+        `шифров ${r.cipherCount} · расширений ${r.extensionCount}<br>` +
+        `JA3 = <b>${r.ja3Md5}</b><br><span class="muted" style="word-break:break-all">${escapeHtml(r.ja3)}</span>` +
+        (real ? "" : "<br><span class=\"muted\">Похоже, исходящий TLS перехватывается прокси/инспектором — наружу уходит его отпечаток, не движка.</span>");
+    } catch { out.textContent = "Не удалось снять отпечаток."; }
   }
 
   // ---- modals + UDP install + composer ------------------------------------

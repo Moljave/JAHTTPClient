@@ -136,7 +136,11 @@
             <option value="Firefox">Firefox</option>
             <option value="Safari">Safari</option>
           </select>
-          <div class="setting-note">TLS (JA3/JA4) + HTTP/2 отпечаток, с которым запрос уходит наверх. Смена пересоздаёт апстрим‑клиентов.</div>
+          <div class="setting-note">TLS (JA3) + HTTP/2 отпечаток, с которым запрос уходит наверх. Смена пересоздаёт апстрим‑клиентов.</div>
+          <div class="row-buttons">
+            <button class="btn" id="btnSelftest" type="button" title="Снять реальный ClientHello локально (мимо любых TLS-инспекторов)">Проверить отпечаток</button>
+          </div>
+          <div class="setting-note" id="selftestOut"></div>
         </div>
 
         <div class="setting">

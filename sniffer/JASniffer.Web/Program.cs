@@ -189,6 +189,11 @@ api.MapPost("/compose", async (ComposeRequest body, UpstreamRelay relay, Session
     }
 });
 
+// Local, interception-proof JA3 self-test: captures the engine's real ClientHello
+// over loopback and reports its fingerprint for the active preset.
+api.MapGet("/fingerprint-selftest", async (UpstreamRelay relay, CancellationToken ct) =>
+    Results.Ok(await relay.CaptureClientHelloAsync(ct)));
+
 app.MapHub<SessionHub>("/hub/sessions");
 app.MapFallbackToFile("index.html");
 

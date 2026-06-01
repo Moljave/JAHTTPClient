@@ -129,6 +129,13 @@ public sealed class UpstreamRelay : IDisposable
     };
 
     /// <summary>
+    /// Captures the engine's real ClientHello over loopback for the active preset and
+    /// returns its JA3 — interception-proof local verification of the TLS fingerprint.
+    /// </summary>
+    public Task<Ja3Report> CaptureClientHelloAsync(CancellationToken ct)
+        => Ja3SelfTest.CaptureAsync(_preset, _forceHttp1, CurrentPresetLabel, ct);
+
+    /// <summary>
     /// Builds and sends a request composed in the UI's Requester through the upstream
     /// client (current fingerprint/settings), recording it as a session. Returns its id.
     /// </summary>
