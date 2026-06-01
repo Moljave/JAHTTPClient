@@ -113,14 +113,25 @@ public sealed partial class SystemProxy(ILogger<SystemProxy> logger)
     private static void Refresh()
     {
         // Tell WinINET its settings changed so the new proxy takes effect at once.
-        InternetSetOption(IntPtr.Zero, INTERNET_OPTION_SETTINGS_CHANGED, IntPtr.Zero, 0);
-        InternetSetOption(IntPtr.Zero, INTERNET_OPTION_REFRESH, IntPtr.Zero, 0);
+        // Best-effort: the registry change already applies to new connections, so a
+        // refresh hiccup must never throw up the stack and leave a half-applied state.
+        try
+        {
+            InternetSetOption(IntPtr.Zero, INTERNET_OPTION_SETTINGS_CHANGED, IntPtr.Zero, 0);
+            InternetSetOption(IntPtr.Zero, INTERNET_OPTION_REFRESH, IntPtr.Zero, 0);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Unusual WinINET build without the W entry point — skip the live refresh.
+        }
     }
 
     private const int INTERNET_OPTION_SETTINGS_CHANGED = 39;
     private const int INTERNET_OPTION_REFRESH = 37;
 
-    [LibraryImport("wininet.dll", SetLastError = true)]
+    // wininet.dll exports InternetSetOptionW/A; [LibraryImport] needs the exact name
+    // (no implicit W/A probing like [DllImport]), so target the wide entry point.
+    [LibraryImport("wininet.dll", EntryPoint = "InternetSetOptionW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
 }

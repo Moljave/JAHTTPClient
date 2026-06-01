@@ -75,7 +75,7 @@ api.MapGet("/sessions/{id:int}", (int id, SessionStore store) =>
     return session is null ? Results.NotFound() : Results.Ok(DtoMapper.ToDetail(session));
 });
 
-api.MapGet("/sessions/{id:int}/request-body", (int id, bool download, SessionStore store) =>
+api.MapGet("/sessions/{id:int}/request-body", (int id, SessionStore store, bool download = false) =>
 {
     var session = store.Get(id);
     return session is null
@@ -83,7 +83,7 @@ api.MapGet("/sessions/{id:int}/request-body", (int id, bool download, SessionSto
         : ServeBody(session.RequestBody, session.RequestContentType, $"request-{id}", download);
 });
 
-api.MapGet("/sessions/{id:int}/response-body", (int id, bool download, SessionStore store) =>
+api.MapGet("/sessions/{id:int}/response-body", (int id, SessionStore store, bool download = false) =>
 {
     var session = store.Get(id);
     return session is null
