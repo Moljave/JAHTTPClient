@@ -1,0 +1,58 @@
+namespace JASniffer.Core;
+
+/// <summary>
+/// Live, mutable knobs that the UI flips at runtime. Reads are lock-free
+/// (volatile) so the proxy hot-path can consult them per request without
+/// contention; writes come from the (single) settings endpoint.
+/// </summary>
+public sealed class SnifferSettings
+{
+    private volatile bool _smartRedirects;
+    private volatile int _maxRedirects = 10;
+    private volatile bool _capture = true;
+    private volatile string? _upstreamProxy;
+
+    /// <summary>
+    /// When false (default, most faithful), the browser receives raw 3xx responses
+    /// and follows them itself, so every hop is captured as its own session and the
+    /// upstream client runs without a cookie jar. When true, the upstream client
+    /// walks the redirect chain (carrying cookies across hops) and only the final
+    /// response is returned to the browser.
+    /// </summary>
+    public bool SmartRedirects
+    {
+        get => _smartRedirects;
+        set => _smartRedirects = value;
+    }
+
+    /// <summary>Maximum redirect hops the upstream client follows when <see cref="SmartRedirects"/> is on.</summary>
+    public int MaxRedirects
+    {
+        get => _maxRedirects;
+        set => _maxRedirects = Math.Clamp(value, 1, 50);
+    }
+
+    /// <summary>Master capture switch. When false, traffic is still proxied but not recorded into the session list.</summary>
+    public bool Capture
+    {
+        get => _capture;
+        set => _capture = value;
+    }
+
+    /// <summary>Optional upstream egress proxy applied to the JAHTTPClient leg (null = direct).</summary>
+    public string? UpstreamProxy
+    {
+        get => _upstreamProxy;
+        set => _upstreamProxy = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    /// <summary>
+    /// Hard cap on the body bytes retained in memory per direction. Larger bodies
+    /// are truncated for the preview/inspector and flagged; this bounds memory for
+    /// a long-running capture.
+    /// </summary>
+    public int MaxBodyBytes { get; init; } = 16 * 1024 * 1024;
+
+    /// <summary>Upper bound on the number of sessions kept in the in-memory ring.</summary>
+    public int MaxSessions { get; init; } = 20_000;
+}

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Core of the JASniffer debugging proxy: capture models, the in-memory session
+    store, root/leaf certificate generation, settings and the Fiddler .saz
+    exporter. Deliberately free of any UI/transport dependency so it can be unit
+    tested and reused. Target framework / language settings come from the
+    repository-level Directory.Build.props (net10.0, C# 13, nullable, implicit
+    usings).
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>JASniffer.Core</RootNamespace>
+    <AssemblyName>JASniffer.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

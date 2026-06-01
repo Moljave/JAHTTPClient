@@ -206,7 +206,11 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             HeaderOrder = BuildHeaderOrder(merged),
             FollowRedirects = false, // redirects handled in managed code
             InsecureSkipVerify = _options.InsecureSkipVerify,
-            WithDefaultCookieJar = true,
+            // A faithful sniffing proxy opts out of the jar so a shared client only
+            // ever sends the cookies the caller put on the request (the browser's
+            // verbatim Cookie header) and never cross-contaminates hosts/tabs.
+            WithDefaultCookieJar = !_options.WithoutCookieJar,
+            WithoutCookieJar = _options.WithoutCookieJar,
             WithRandomTlsExtensionOrder = _options.EnableJa3Fingerprinting,
             ForceHttp1 = _options.ForceHttp1,
             TimeoutMilliseconds = (int)Math.Clamp(_options.Timeout.TotalMilliseconds, 1, int.MaxValue),

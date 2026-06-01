@@ -80,6 +80,23 @@ public sealed class ChromeHttpClientOptions
     public bool ForceHttp1 { get; set; }
 
     /// <summary>
+    /// Run requests without the per-session cookie jar: server <c>Set-Cookie</c>
+    /// headers are neither persisted nor auto-replayed, and only the cookies the
+    /// caller puts on the request (e.g. a verbatim <c>Cookie</c> header) are sent.
+    /// Defaults to false (the persistent jar is used).
+    /// </summary>
+    /// <remarks>
+    /// This is what a faithful intercepting proxy wants: the upstream request must
+    /// carry exactly the cookies the browser sent — no more, no less — so a shared
+    /// client never contaminates one host/tab with another's cookies. The native
+    /// tls-client contract supports this per request (<c>withoutCookieJar</c>).
+    /// Note that with the jar disabled, managed redirect following no longer
+    /// carries <c>Set-Cookie</c> values across hops, so leave it false when you rely
+    /// on <see cref="AllowAutoRedirect"/> to walk a chain.
+    /// </remarks>
+    public bool WithoutCookieJar { get; set; }
+
+    /// <summary>
     /// Optional cap on concurrent in-flight native requests. 0 (default) = no
     /// limit. Set a positive value to bound memory under extreme fan-out, since
     /// each in-flight request holds a managed thread blocked on the native call.

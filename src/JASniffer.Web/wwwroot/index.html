@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JASniffer — Chrome-fingerprint HTTPS sniffer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand">
+      <span class="logo">JA</span>
+      <div>
+        <div class="title">JASniffer</div>
+        <div class="subtitle">HTTPS sniffer · upstream fingerprint <b id="presetLabel">Chrome 148</b></div>
+      </div>
+    </div>
+
+    <div class="toolbar-actions">
+      <button id="btnClear" class="btn" title="Clear the session list">Clear</button>
+      <button id="btnExport" class="btn" title="Export sessions to a Fiddler .saz archive">Export .saz</button>
+      <button id="btnCa" class="btn" title="Download the root CA to install as trusted">Download CA</button>
+
+      <label class="toggle" title="Route the OS proxy through JASniffer (Windows)">
+        <input type="checkbox" id="tglSystemProxy" /> <span>System Proxy</span>
+      </label>
+      <label class="toggle" title="Follow redirect chains upstream and return only the final response">
+        <input type="checkbox" id="tglRedirects" /> <span>Smart Redirects</span>
+      </label>
+      <label class="toggle" title="Record intercepted traffic into the list">
+        <input type="checkbox" id="tglCapture" checked /> <span>Capture</span>
+      </label>
+
+      <span id="connDot" class="dot dot-off" title="SignalR connection"></span>
+    </div>
+  </header>
+
+  <div class="filterbar">
+    <input type="search" id="filterText" class="filter-input" placeholder="Filter by URL, host, method, status, or body text…" />
+    <select id="filterMethod" class="filter-select"><option value="">Method</option></select>
+    <select id="filterStatus" class="filter-select">
+      <option value="">Status</option>
+      <option value="2">2xx</option><option value="3">3xx</option>
+      <option value="4">4xx</option><option value="5">5xx</option>
+    </select>
+    <select id="filterType" class="filter-select"><option value="">Content-Type</option></select>
+    <span id="counts" class="counts"></span>
+  </div>
+
+  <main class="split">
+    <!-- session grid (virtualized) -->
+    <section class="grid-pane" id="gridPane">
+      <div class="grid-head">
+        <div class="col col-id">#</div>
+        <div class="col col-res">Result</div>
+        <div class="col col-proto">Proto</div>
+        <div class="col col-method">Method</div>
+        <div class="col col-host">Host</div>
+        <div class="col col-url">URL</div>
+        <div class="col col-type">Type</div>
+        <div class="col col-size">Size</div>
+        <div class="col col-time">Time</div>
+      </div>
+      <div class="grid-scroll" id="gridScroll">
+        <div class="grid-rows" id="gridRows"></div>
+      </div>
+    </section>
+
+    <div class="divider" id="divider"></div>
+
+    <!-- inspectors -->
+    <section class="inspect-pane">
+      <div class="inspect req">
+        <div class="inspect-head">
+          <span class="inspect-title">Request</span>
+          <span id="reqBadges" class="badges"></span>
+        </div>
+        <nav class="tabs" id="reqTabs">
+          <button class="tab active" data-tab="headers">Headers</button>
+          <button class="tab" data-tab="params">Params</button>
+          <button class="tab" data-tab="cookies">Cookies</button>
+          <button class="tab" data-tab="auth">Auth</button>
+          <button class="tab" data-tab="raw">Raw</button>
+          <button class="tab" data-tab="body">Body</button>
+        </nav>
+        <div class="tab-body" id="reqBody"><div class="empty">Select a session to inspect.</div></div>
+      </div>
+
+      <div class="inspect-divider" id="inspectDivider"></div>
+
+      <div class="inspect res">
+        <div class="inspect-head">
+          <span class="inspect-title">Response</span>
+          <span id="resBadges" class="badges"></span>
+        </div>
+        <nav class="tabs" id="resTabs">
+          <button class="tab active" data-tab="headers">Headers</button>
+          <button class="tab" data-tab="cookies">Cookies</button>
+          <button class="tab" data-tab="raw">Raw</button>
+          <button class="tab" data-tab="preview">Preview</button>
+          <button class="tab" data-tab="body">Body</button>
+        </nav>
+        <div class="tab-body" id="resBody"><div class="empty">Select a session to inspect.</div></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="caHint" class="hint hidden">
+    <div class="hint-card">
+      <h3>Install the root CA to decrypt HTTPS</h3>
+      <p>JASniffer signs per-site certificates with its own root CA. Until you trust it,
+         HTTPS sites will warn. Download the CA and add it to your OS/browser trust store, then set
+         your proxy to <code>127.0.0.1:<span id="hintPort">8866</span></code>.</p>
+      <p class="muted" id="caStore"></p>
+      <div class="hint-actions">
+        <button class="btn" id="hintDownloadCa">Download CA (.cer)</button>
+        <button class="btn ghost" id="hintClose">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/signalr.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
