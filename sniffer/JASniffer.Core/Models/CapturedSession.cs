@@ -98,7 +98,17 @@ public sealed class CapturedSession
     /// </summary>
     public bool WasTunneled { get; set; }
 
-    /// <summary>Bytes shuttled in each direction for a tunneled session (browser→server, server→browser).</summary>
+    /// <summary>
+    /// <c>true</c> for passively-captured UDP flows (DNS/QUIC) observed via WinDivert.
+    /// These are read-only: they are never relayed or re-fingerprinted (the upstream
+    /// engine is TCP/TLS only), just summarized for visibility.
+    /// </summary>
+    public bool IsUdp { get; set; }
+
+    /// <summary>Datagrams seen in each direction for a tunneled/UDP flow.</summary>
+    public long Packets { get; set; }
+
+    /// <summary>Bytes shuttled in each direction (client→server, server→client) for a tunneled/UDP flow.</summary>
     public long TunnelBytesUp { get; set; }
     public long TunnelBytesDown { get; set; }
 }

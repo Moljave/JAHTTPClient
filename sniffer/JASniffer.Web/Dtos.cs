@@ -31,7 +31,8 @@ public sealed record SessionSummaryDto(
     bool UpstreamOk,
     string FingerprintPreset,
     long TunnelBytesUp,
-    long TunnelBytesDown);
+    long TunnelBytesDown,
+    bool IsUdp);
 
 public sealed record HeaderDto(string Name, string Value);
 
@@ -64,7 +65,9 @@ public sealed record StatusDto(
     string CaStoreDirectory,
     string Platform,
     bool SystemProxySupported,
-    bool SystemProxyEnabled);
+    bool SystemProxyEnabled,
+    bool UdpSupported,
+    bool UdpRunning);
 
 /// <summary>Maps capture models to the wire DTOs, decoding textual bodies for display.</summary>
 public static class DtoMapper
@@ -96,7 +99,8 @@ public static class DtoMapper
         s.UpstreamOk,
         s.FingerprintPreset,
         s.TunnelBytesUp,
-        s.TunnelBytesDown);
+        s.TunnelBytesDown,
+        s.IsUdp);
 
     public static SessionDetailDto ToDetail(CapturedSession s) => new(
         ToSummary(s),

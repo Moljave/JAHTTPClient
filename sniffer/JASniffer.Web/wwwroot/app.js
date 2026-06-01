@@ -119,11 +119,12 @@
   }
 
   function rowHtml(s, i) {
-    const cls = (s.id === state.selectedId ? " sel" : "") + (s.completed || s.wasTunneled ? "" : " pending") + (s.wasTunneled ? " tunneled" : "");
-    const res = s.wasTunneled ? "TUN" : s.error ? "ERR" : (s.status || "…");
-    const resCls = s.wasTunneled ? "" : statusClass(s);
-    const proto = s.wasTunneled ? "tunnel" : (s.scheme + (s.responseHttpVersion ? " " + (s.responseHttpVersion.startsWith("2") ? "h2" : "h1") : ""));
-    const size = s.wasTunneled ? formatBytes(s.tunnelBytesUp + s.tunnelBytesDown) : formatBytes(s.bodyLength);
+    const special = s.wasTunneled || s.isUdp;
+    const cls = (s.id === state.selectedId ? " sel" : "") + (s.completed || special ? "" : " pending") + (s.wasTunneled ? " tunneled" : "") + (s.isUdp ? " udp" : "");
+    const res = s.isUdp ? "UDP" : s.wasTunneled ? "TUN" : s.error ? "ERR" : (s.status || "…");
+    const resCls = s.isUdp ? "s-udp" : s.wasTunneled ? "" : statusClass(s);
+    const proto = s.isUdp ? s.scheme : s.wasTunneled ? "tunnel" : (s.scheme + (s.responseHttpVersion ? " " + (s.responseHttpVersion.startsWith("2") ? "h2" : "h1") : ""));
+    const size = special ? formatBytes(s.tunnelBytesUp + s.tunnelBytesDown) : formatBytes(s.bodyLength);
     return `<div class="grid-row${cls}" data-id="${s.id}" style="top:${i * ROW_H}px">
       <div class="col col-id">${s.id}</div>
       <div class="col col-res ${resCls}">${res}</div>
@@ -378,10 +379,15 @@
 
     $("#tglRedirects").addEventListener("change", saveSettings);
     $("#tglCapture").addEventListener("change", saveSettings);
-    $("#tglSystemProxy").addEventListener("change", async (e) => {
+    $("#modeManual").addEventListener("click", () => applyMode("manual"));
+    $("#modeSystem").addEventListener("click", () => applyMode("system"));
+    $("#tglUdp").addEventListener("change", async (e) => {
       try {
-        const r = await api("/api/system-proxy", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: e.target.checked }) });
-        if (!r.applied && e.target.checked) { e.target.checked = false; alert(r.supported ? "Could not change the system proxy." : "System proxy toggle is only supported on Windows. Set 127.0.0.1:8866 in your browser manually."); }
+        const r = await api("/api/udp-capture", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: e.target.checked }) });
+        if (e.target.checked && !r.running) {
+          e.target.checked = false;
+          alert(r.error || (r.supported ? "Could not start UDP capture." : "UDP capture needs Windows + admin + WinDivert.dll next to the app."));
+        }
       } catch { e.target.checked = false; }
     });
 
@@ -444,14 +450,36 @@
     conn.start().then(() => setDot(true)).catch(() => { setDot(false); setTimeout(connectHub, 2000); });
   }
 
+  function setActiveMode(mode) {
+    $("#modeSystem").classList.toggle("active", mode === "system");
+    $("#modeManual").classList.toggle("active", mode !== "system");
+  }
+
+  async function applyMode(mode) {
+    if (mode === "system" && !state.systemProxySupported) {
+      alert("Режим System (системный прокси) доступен только на Windows. Здесь используйте Manual и направьте приложение/браузер на 127.0.0.1:" + (state.proxyPort || 8866) + ".");
+      return;
+    }
+    try {
+      const r = await api("/api/system-proxy", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: mode === "system" }) });
+      setActiveMode(r.enabled ? "system" : "manual");
+      if (mode === "system" && !r.enabled) alert("Не удалось включить системный прокси.");
+    } catch { /* ignore */ }
+  }
+
   async function loadStatus() {
     try {
       const st = await api("/api/status");
+      state.proxyPort = st.proxyPort;
+      state.systemProxySupported = st.systemProxySupported;
       $("#hintPort").textContent = st.proxyPort;
       $("#caStore").textContent = "CA: " + st.caSubject + "  ·  stored in " + st.caStoreDirectory;
-      const tgl = $("#tglSystemProxy");
-      tgl.checked = st.systemProxyEnabled;
-      if (!st.systemProxySupported) { tgl.parentElement.title = "Only available on Windows — set 127.0.0.1:" + st.proxyPort + " in your browser manually."; }
+      $("#modeHint").textContent = "→ 127.0.0.1:" + st.proxyPort;
+      setActiveMode(st.systemProxyEnabled ? "system" : "manual");
+      if (!st.systemProxySupported) $("#modeSystem").classList.add("disabled");
+      const udp = $("#tglUdp");
+      udp.checked = !!st.udpRunning;
+      if (!st.udpSupported) { udp.disabled = true; udp.parentElement.title = "UDP-захват (WinDivert) доступен только на Windows."; }
       if (!localStorage.getItem("ca-dismissed")) $("#caHint").classList.remove("hidden");
     } catch { /* status is best-effort */ }
   }

@@ -4,6 +4,7 @@ using JASniffer.Core.Certificates;
 using JASniffer.Core.Export;
 using JASniffer.Web;
 using JASniffer.Proxy;
+using JASniffer.Proxy.Udp;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,6 +22,7 @@ builder.Services.AddSingleton<SessionStore>();
 builder.Services.AddSingleton(CertificateAuthority.LoadOrCreate(caDir));
 builder.Services.AddSingleton<UpstreamRelay>();
 builder.Services.AddSingleton<SystemProxy>();
+builder.Services.AddSingleton<UdpCaptureService>();
 builder.Services.AddSingleton(sp => new ProxyServer(
     sp.GetRequiredService<SnifferSettings>(),
     sp.GetRequiredService<SessionStore>(),
@@ -44,7 +46,7 @@ app.UseStaticFiles();
 // ---- REST API --------------------------------------------------------------
 var api = app.MapGroup("/api");
 
-api.MapGet("/status", (CertificateAuthority ca, SystemProxy systemProxy) => new StatusDto(
+api.MapGet("/status", (CertificateAuthority ca, SystemProxy systemProxy, UdpCaptureService udp) => new StatusDto(
     proxyPort,
     uiPort,
     ca.Subject,
@@ -52,7 +54,9 @@ api.MapGet("/status", (CertificateAuthority ca, SystemProxy systemProxy) => new 
     CertificateAuthority.DefaultStoreDirectory,
     System.Runtime.InteropServices.RuntimeInformation.OSDescription,
     systemProxy.Supported,
-    systemProxy.Enabled));
+    systemProxy.Enabled,
+    udp.Supported,
+    udp.Running));
 
 api.MapGet("/settings", (SnifferSettings s) =>
     new SettingsDto(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy));
@@ -126,6 +130,20 @@ api.MapPost("/system-proxy", (SystemProxyRequest body, SystemProxy systemProxy) 
     return Results.Ok(new { supported = systemProxy.Supported, enabled = systemProxy.Enabled, applied = ok });
 });
 
+api.MapPost("/udp-capture", (UdpToggle body, UdpCaptureService udp) =>
+{
+    if (body.Enabled)
+    {
+        udp.Start();
+    }
+    else
+    {
+        udp.Stop();
+    }
+
+    return Results.Ok(new { supported = udp.Supported, running = udp.Running, error = udp.LastError });
+});
+
 app.MapHub<SessionHub>("/hub/sessions");
 app.MapFallbackToFile("index.html");
 
@@ -159,3 +177,5 @@ static IResult ServeBody(byte[] body, string? contentType, string name, bool dow
 }
 
 internal sealed record SystemProxyRequest(bool Enabled);
+
+internal sealed record UdpToggle(bool Enabled);

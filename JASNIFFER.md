@@ -132,6 +132,51 @@ JASniffer-YYYYMMDD-HHMMSS.saz   (ZIP)
 
 ---
 
+## Режим захвата (System / Manual)
+
+Сегмент‑тумблер **Mode** в тулбаре переключает, откуда берётся трафик:
+
+- **System** — поставить системный прокси ОС на `127.0.0.1:8866` (WinINET, только
+  Windows): перехватывается **весь** трафик системы. `localhost` исключён, чтобы
+  сам UI и его SignalR‑сокет не шли через прокси. При выключении прежние
+  настройки прокси восстанавливаются.
+- **Manual** — системный прокси выключен; снифер ловит **только то**, что вы сами
+  направили на `127.0.0.1:8866` (конкретный браузер/приложение). Адрес для
+  настройки показан рядом с тумблером.
+
+Вне Windows доступен только **Manual** (системный прокси API недоступен) —
+настройте прокси в браузере вручную.
+
+## UDP‑захват (WinDivert, пассивно)
+
+`JAHTTPClient`/utls — это **только TCP/TLS**, поэтому UDP (DNS, QUIC/HTTP‑3)
+нельзя переотправить с отпечатком Chrome. Тумблер **UDP** включает **пассивный**
+захват через драйвер **WinDivert**: датаграммы DNS (`:53`) и QUIC (`:443/udp`)
+агрегируются по 4‑кортежу в read‑only «потоки» и показываются в общем списке
+(scheme `dns`/`quic`, метод `UDP`, фиолетовая метка). Это **только наблюдение**:
+UDP не расшифровывается и не ретранслируется. Для DNS разбирается имя запроса.
+
+Требования (Windows): запуск **от администратора** и файлы **WinDivert** рядом со
+сборкой (`WinDivert.dll` + `WinDivert64.sys`, и `WinDivert32.sys` для x86) —
+скачайте релиз с [reqrypt.org/windivert.html](https://reqrypt.org/windivert.html)
+и положите их в каталог запуска (`...\sniffer\JASniffer.Web\bin\<Config>\net10.0\`).
+Если файлов/прав нет — тумблер вернёт понятную ошибку, остальной снифер работает
+как обычно.
+
+## Нативные библиотеки — куда класть
+
+Рядом со сборкой `JASniffer.Web` (`bin\<Debug|Release>\net10.0\`):
+
+| Файл | Назначение | Где взять |
+|---|---|---|
+| `runtimes\win-x64\native\tls-client-windows-64.dll` | движок Chrome‑JA3 (обязателен) | `native\build-windows.ps1`; либо положить в `src\JAHTTPClient\runtimes\win-x64\native\` — `dotnet build` скопирует |
+| `WinDivert.dll`, `WinDivert64.sys` | UDP‑захват (опционально) | релиз WinDivert |
+
+Managed `JAHTTPClient.dll` копировать вручную не нужно — он собирается по
+`ProjectReference`.
+
+---
+
 ## Принятые решения и компромиссы
 
 Где промпт допускал выбор — принято разумное решение и описано здесь.
@@ -221,7 +266,8 @@ SPA — vanilla JS/HTML/CSS из `wwwroot` (без Node‑сборки); кли�
 | POST | `/api/clear` | очистить список |
 | GET | `/api/ca.cer` | скачать корневой CA (DER) |
 | GET | `/api/export.saz` | экспорт (`?ids=1,2,3` — выбранные) |
-| POST | `/api/system-proxy` | `{ "enabled": true|false }` (Windows) |
+| POST | `/api/system-proxy` | `{ "enabled": true|false }` — режим System/Manual (Windows) |
+| POST | `/api/udp-capture` | `{ "enabled": true|false }` — пассивный UDP через WinDivert (Windows) |
 | WS | `/hub/sessions` | SignalR: события `sessions` / `cleared` |
 
 ---

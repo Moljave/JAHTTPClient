@@ -21,8 +21,14 @@
       <button id="btnExport" class="btn" title="Export sessions to a Fiddler .saz archive">Export .saz</button>
       <button id="btnCa" class="btn" title="Download the root CA to install as trusted">Download CA</button>
 
-      <label class="toggle" title="Route the OS proxy through JASniffer (Windows)">
-        <input type="checkbox" id="tglSystemProxy" /> <span>System Proxy</span>
+      <div class="seg-group" title="System = OS-wide proxy (all traffic, Windows). Manual = capture only what you point at 127.0.0.1:8866.">
+        <span class="seg-title">Mode</span>
+        <button id="modeManual" class="seg active" type="button">Manual</button>
+        <button id="modeSystem" class="seg" type="button">System</button>
+        <span id="modeHint" class="seg-hint"></span>
+      </div>
+      <label class="toggle" title="Passively capture UDP (DNS/QUIC) via WinDivert — Windows, requires admin + WinDivert.dll">
+        <input type="checkbox" id="tglUdp" /> <span>UDP</span>
       </label>
       <label class="toggle" title="Follow redirect chains upstream and return only the final response">
         <input type="checkbox" id="tglRedirects" /> <span>Smart Redirects</span>

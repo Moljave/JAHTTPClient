@@ -59,6 +59,19 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; ba
 .dot-on { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .dot-off { background: var(--red); }
 
+/* segmented Mode control */
+.seg-group { display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; }
+.seg-title { color: var(--muted); font-size: 11px; padding: 0 4px; }
+.seg { background: transparent; border: none; color: var(--muted); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+.seg:hover { color: var(--text); }
+.seg.active { background: var(--accent); color: #fff; }
+.seg.disabled { opacity: .45; cursor: not-allowed; }
+.seg-hint { color: var(--muted); font-size: 11px; padding-left: 2px; }
+
+/* UDP (passive WinDivert) rows */
+.grid-row.udp .col-res { color: #b483e0; }
+.s-udp { color: #b483e0; }
+
 /* ---- filter bar ---- */
 .filterbar { display: flex; gap: 8px; align-items: center; padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
 .filter-input { flex: 1; background: var(--bg-3); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; }
