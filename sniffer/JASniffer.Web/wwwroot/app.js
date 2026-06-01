@@ -389,15 +389,17 @@
     $("#tglCapture").addEventListener("change", saveSettings);
     $("#modeManual").addEventListener("click", () => applyMode("manual"));
     $("#modeSystem").addEventListener("click", () => applyMode("system"));
-    $("#tglUdp").addEventListener("change", async (e) => {
-      try {
-        const r = await api("/api/udp-capture", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: e.target.checked }) });
-        if (e.target.checked && !r.running) {
-          e.target.checked = false;
-          alert(r.error || (r.supported ? "Could not start UDP capture." : "UDP capture needs Windows + admin + WinDivert.dll next to the app."));
-        }
-      } catch { e.target.checked = false; }
-    });
+    $("#tglUdp").addEventListener("change", onUdpToggle);
+    $("#selPreset").addEventListener("change", saveSettings);
+    $("#tglForceHttp1").addEventListener("change", saveSettings);
+
+    $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
+    $("#settingsClose").addEventListener("click", () => closeModal("settingsModal"));
+    $("#btnRequester").addEventListener("click", () => { prefillRequester(); openModal("requesterModal"); });
+    $("#cmpClose").addEventListener("click", () => closeModal("requesterModal"));
+    $("#cmpSend").addEventListener("click", sendComposer);
+    ["settingsModal", "requesterModal"].forEach((id) =>
+      $("#" + id).addEventListener("click", (e) => { if (e.target.id === id) closeModal(id); }));
 
     el.filterText.addEventListener("input", () => { state.filter.text = el.filterText.value.toLowerCase(); scheduleRender(); });
     el.filterMethod.addEventListener("change", () => { state.filter.method = el.filterMethod.value; scheduleRender(); });
@@ -413,8 +415,70 @@
       maxRedirects: 10,
       capture: $("#tglCapture").checked,
       upstreamProxy: null,
+      fingerprintPreset: $("#selPreset").value,
+      forceHttp1: $("#tglForceHttp1").checked,
     };
     await api("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(dto) });
+    const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
+    $("#presetLabel").textContent = label;
+  }
+
+  // ---- modals + UDP install + composer ------------------------------------
+  function openModal(id) { $("#" + id).classList.remove("hidden"); }
+  function closeModal(id) { $("#" + id).classList.add("hidden"); }
+
+  async function udpCall(enabled) {
+    try {
+      return await api("/api/udp-capture", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) });
+    } catch { return { running: false, supported: false, error: "request failed" }; }
+  }
+
+  async function onUdpToggle(e) {
+    if (!e.target.checked) { await udpCall(false); return; }
+    let r = await udpCall(true);
+    if (!r.running && r.supported && /not found|windivert\.dll/i.test(r.error || "")) {
+      if (confirm("WinDivert не найден. Скачать и установить автоматически с reqrypt.org (≈400 КБ, официальный релиз)?")) {
+        const ins = await api("/api/install-windivert", { method: "POST" });
+        alert(ins.message || (ins.ok ? "Установлено." : "Не удалось установить."));
+        if (ins.installed) r = await udpCall(true);
+      }
+    }
+    if (!r.running) {
+      e.target.checked = false;
+      if (r.error) alert(r.error);
+    }
+  }
+
+  function prefillRequester() {
+    if (!state.detail || $("#cmpUrl").value.trim()) return; // keep manual edits
+    const d = state.detail;
+    $("#cmpMethod").value = (d.summary.method || "GET").toUpperCase();
+    $("#cmpUrl").value = d.summary.url || "";
+    $("#cmpHeaders").value = d.requestHeaders.map((h) => h.name + ": " + h.value).join("\n");
+    $("#cmpBody").value = d.requestBody && d.requestBody.isText && d.requestBody.text ? d.requestBody.text : "";
+  }
+
+  async function sendComposer() {
+    const url = $("#cmpUrl").value.trim();
+    const status = $("#cmpStatus");
+    if (!url) { status.textContent = "Укажите URL."; return; }
+    status.textContent = "Отправка…";
+    try {
+      const resp = await fetch("/api/compose", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ method: $("#cmpMethod").value, url, headers: $("#cmpHeaders").value, body: $("#cmpBody").value }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.id) {
+        status.textContent = "Отправлено — сессия #" + data.id;
+        closeModal("requesterModal");
+        selectSession(data.id);
+      } else {
+        status.textContent = data.error || ("Ошибка HTTP " + resp.status);
+      }
+    } catch {
+      status.textContent = "Запрос не удался.";
+    }
   }
 
   function initDividers() {
@@ -481,7 +545,9 @@
       state.proxyPort = st.proxyPort;
       state.systemProxySupported = st.systemProxySupported;
       $("#hintPort").textContent = st.proxyPort;
-      $("#caStore").textContent = "CA: " + st.caSubject + "  ·  stored in " + st.caStoreDirectory;
+      const caText = "CA: " + st.caSubject + "  ·  " + st.caStoreDirectory;
+      $("#caStore").textContent = caText;
+      $("#caStoreInfo").textContent = caText;
       $("#modeHint").textContent = "→ 127.0.0.1:" + st.proxyPort;
       setActiveMode(st.systemProxyEnabled ? "system" : "manual");
       if (!st.systemProxySupported) $("#modeSystem").classList.add("disabled");
@@ -497,6 +563,10 @@
       const s = await api("/api/settings");
       $("#tglRedirects").checked = s.smartRedirects;
       $("#tglCapture").checked = s.capture;
+      $("#tglForceHttp1").checked = s.forceHttp1;
+      if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
+      const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
+      if (label) $("#presetLabel").textContent = label;
     } catch { /* ignore */ }
   }
 

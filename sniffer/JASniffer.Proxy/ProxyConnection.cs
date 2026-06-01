@@ -226,7 +226,7 @@ internal sealed class ProxyConnection(
             RequestBodyTruncated = truncated,
             RequestContentType = HttpParsing.FirstHeader(request.Headers, "Content-Type"),
             ClientEndpoint = _clientEndpoint,
-            FingerprintPreset = "Chrome 148",
+            FingerprintPreset = relay.CurrentPresetLabel,
         };
     }
 

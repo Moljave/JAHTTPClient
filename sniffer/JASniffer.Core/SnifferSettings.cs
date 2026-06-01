@@ -11,6 +11,8 @@ public sealed class SnifferSettings
     private volatile int _maxRedirects = 10;
     private volatile bool _capture = true;
     private volatile string? _upstreamProxy;
+    private volatile string _fingerprintPreset = "Chrome";
+    private volatile bool _forceHttp1;
 
     /// <summary>
     /// When false (default, most faithful), the browser receives raw 3xx responses
@@ -44,6 +46,23 @@ public sealed class SnifferSettings
     {
         get => _upstreamProxy;
         set => _upstreamProxy = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    /// <summary>
+    /// Browser fingerprint to emulate upstream: one of <c>Chrome</c>, <c>ChromeLatest</c>,
+    /// <c>Edge</c>, <c>Firefox</c>, <c>Safari</c>. Changing it rebuilds the upstream clients.
+    /// </summary>
+    public string FingerprintPreset
+    {
+        get => _fingerprintPreset;
+        set => _fingerprintPreset = string.IsNullOrWhiteSpace(value) ? "Chrome" : value.Trim();
+    }
+
+    /// <summary>Force HTTP/1.1 upstream instead of negotiating HTTP/2 (some anti-bot setups prefer h1).</summary>
+    public bool ForceHttp1
+    {
+        get => _forceHttp1;
+        set => _forceHttp1 = value;
     }
 
     /// <summary>

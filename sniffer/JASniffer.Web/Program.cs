@@ -2,6 +2,7 @@ using System.Net;
 using JASniffer.Core;
 using JASniffer.Core.Certificates;
 using JASniffer.Core.Export;
+using JASniffer.Core.Models;
 using JASniffer.Web;
 using JASniffer.Proxy;
 using JASniffer.Proxy.Udp;
@@ -23,6 +24,13 @@ builder.Services.AddSingleton(CertificateAuthority.LoadOrCreate(caDir));
 builder.Services.AddSingleton<UpstreamRelay>();
 builder.Services.AddSingleton<SystemProxy>();
 builder.Services.AddSingleton<UdpCaptureService>();
+var winDivertUrl = builder.Configuration.GetValue("JASniffer:WinDivertUrl", WinDivertInstaller.DefaultUrl)!;
+var winDivertSha = builder.Configuration.GetValue("JASniffer:WinDivertSha256", WinDivertInstaller.DefaultSha256)!;
+builder.Services.AddSingleton(sp => new WinDivertInstaller(sp.GetRequiredService<ILogger<WinDivertInstaller>>())
+{
+    DownloadUrl = winDivertUrl,
+    ExpectedSha256 = winDivertSha,
+});
 builder.Services.AddSingleton(sp => new ProxyServer(
     sp.GetRequiredService<SnifferSettings>(),
     sp.GetRequiredService<SessionStore>(),
@@ -46,7 +54,7 @@ app.UseStaticFiles();
 // ---- REST API --------------------------------------------------------------
 var api = app.MapGroup("/api");
 
-api.MapGet("/status", (CertificateAuthority ca, SystemProxy systemProxy, UdpCaptureService udp) => new StatusDto(
+api.MapGet("/status", (CertificateAuthority ca, SystemProxy systemProxy, UdpCaptureService udp, WinDivertInstaller windivert) => new StatusDto(
     proxyPort,
     uiPort,
     ca.Subject,
@@ -56,18 +64,21 @@ api.MapGet("/status", (CertificateAuthority ca, SystemProxy systemProxy, UdpCapt
     systemProxy.Supported,
     systemProxy.Enabled,
     udp.Supported,
-    udp.Running));
+    udp.Running,
+    windivert.IsInstalled));
 
-api.MapGet("/settings", (SnifferSettings s) =>
-    new SettingsDto(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy));
+api.MapGet("/settings", (SnifferSettings s) => Settings(s));
 
-api.MapPost("/settings", (SettingsDto dto, SnifferSettings s) =>
+api.MapPost("/settings", (SettingsDto dto, SnifferSettings s, UpstreamRelay relay) =>
 {
     s.SmartRedirects = dto.SmartRedirects;
     s.MaxRedirects = dto.MaxRedirects;
     s.Capture = dto.Capture;
     s.UpstreamProxy = dto.UpstreamProxy;
-    return new SettingsDto(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy);
+    s.FingerprintPreset = dto.FingerprintPreset;
+    s.ForceHttp1 = dto.ForceHttp1;
+    relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1); // rebuilds the upstream clients only if these changed
+    return Settings(s);
 });
 
 api.MapGet("/sessions", (SessionStore store) =>
@@ -150,6 +161,34 @@ api.MapPost("/udp-capture", (UdpToggle body, UdpCaptureService udp) =>
     return Results.Ok(new { supported = udp.Supported, running = udp.Running, error = udp.LastError });
 });
 
+api.MapPost("/install-windivert", async (WinDivertInstaller installer, CancellationToken ct) =>
+{
+    var (ok, message) = await installer.EnsureInstalledAsync(ct);
+    return Results.Ok(new { ok, message, installed = installer.IsInstalled });
+});
+
+// Composer: build a request and send it upstream through JAHTTPClient (Chrome
+// fingerprint, current settings); it is recorded like any captured session.
+api.MapPost("/compose", async (ComposeRequest body, UpstreamRelay relay, SessionStore store, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Url))
+    {
+        return Results.BadRequest(new { error = "URL is required." });
+    }
+
+    try
+    {
+        var headers = ParseHeaderBlock(body.Headers);
+        byte[] payload = string.IsNullOrEmpty(body.Body) ? [] : System.Text.Encoding.UTF8.GetBytes(body.Body);
+        var id = await relay.ComposeAsync(store, body.Method ?? "GET", body.Url!, headers, payload, ct);
+        return Results.Ok(new { id });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
 app.MapHub<SessionHub>("/hub/sessions");
 app.MapFallbackToFile("index.html");
 
@@ -182,6 +221,36 @@ static IResult ServeBody(byte[] body, string? contentType, string name, bool dow
     return Results.Bytes(body, type);
 }
 
+static SettingsDto Settings(SnifferSettings s) =>
+    new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.FingerprintPreset, s.ForceHttp1);
+
+// Parses a "Name: Value" per-line header block (as typed in the Requester) into
+// ordered header entries.
+static List<HeaderEntry> ParseHeaderBlock(string? block)
+{
+    var headers = new List<HeaderEntry>();
+    if (string.IsNullOrWhiteSpace(block))
+    {
+        return headers;
+    }
+
+    foreach (var raw in block.Split('\n'))
+    {
+        var line = raw.Trim();
+        var colon = line.IndexOf(':');
+        if (colon <= 0)
+        {
+            continue;
+        }
+
+        headers.Add(new HeaderEntry(line[..colon].Trim(), line[(colon + 1)..].Trim()));
+    }
+
+    return headers;
+}
+
 internal sealed record SystemProxyRequest(bool Enabled);
 
 internal sealed record UdpToggle(bool Enabled);
+
+internal sealed record ComposeRequest(string? Method, string? Url, string? Headers, string? Body);

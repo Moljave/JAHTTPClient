@@ -17,27 +17,10 @@
     </div>
 
     <div class="toolbar-actions">
-      <button id="btnClear" class="btn" title="Clear the session list">Clear</button>
-      <button id="btnExport" class="btn" title="Export sessions to a Fiddler .saz archive">Export .saz</button>
-      <button id="btnInstallCa" class="btn" title="Install the root CA into the OS trusted-root store automatically (Windows)">Install CA</button>
-      <button id="btnCa" class="btn" title="Download the root CA to install manually (e.g. Firefox)">Download CA</button>
-
-      <div class="seg-group" title="System = OS-wide proxy (all traffic, Windows). Manual = capture only what you point at 127.0.0.1:8866.">
-        <span class="seg-title">Mode</span>
-        <button id="modeManual" class="seg active" type="button">Manual</button>
-        <button id="modeSystem" class="seg" type="button">System</button>
-        <span id="modeHint" class="seg-hint"></span>
-      </div>
-      <label class="toggle" title="Passively capture UDP (DNS/QUIC) via WinDivert — Windows, requires admin + WinDivert.dll">
-        <input type="checkbox" id="tglUdp" /> <span>UDP</span>
-      </label>
-      <label class="toggle" title="Follow redirect chains upstream and return only the final response">
-        <input type="checkbox" id="tglRedirects" /> <span>Smart Redirects</span>
-      </label>
-      <label class="toggle" title="Record intercepted traffic into the list">
-        <input type="checkbox" id="tglCapture" checked /> <span>Capture</span>
-      </label>
-
+      <button id="btnRequester" class="btn" title="Собрать и отправить запрос через движок с отпечатком Chrome">⤴ Requester</button>
+      <button id="btnClear" class="btn" title="Очистить список сессий">Clear</button>
+      <button id="btnExport" class="btn" title="Экспорт сессий в архив Fiddler .saz">Export .saz</button>
+      <button id="btnSettings" class="btn" title="Настройки">⚙ Settings</button>
       <span id="connDot" class="dot dot-off" title="SignalR connection"></span>
     </div>
   </header>
@@ -125,6 +108,77 @@
         <button class="btn" id="hintInstallCa">Install CA automatically</button>
         <button class="btn" id="hintDownloadCa">Download CA (.cer)</button>
         <button class="btn ghost" id="hintClose">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings menu (everything lives here) -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h3>Настройки</h3><button class="x" id="settingsClose" title="Закрыть">✕</button></div>
+      <div class="modal-body">
+        <div class="setting">
+          <div class="setting-label">Режим захвата</div>
+          <div class="seg-group">
+            <button id="modeManual" class="seg active" type="button">Manual</button>
+            <button id="modeSystem" class="seg" type="button">System</button>
+            <span id="modeHint" class="seg-hint"></span>
+          </div>
+          <div class="setting-note"><b>System</b> — системный прокси ОС (весь трафик, Windows). <b>Manual</b> — ловится только то, что направлено на <code>127.0.0.1:8866</code>.</div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">JA3 / отпечаток апстрима</div>
+          <select id="selPreset" class="filter-select">
+            <option value="Chrome">Chrome 148</option>
+            <option value="ChromeLatest">Chrome 146 (новейший в либе)</option>
+            <option value="Edge">Edge</option>
+            <option value="Firefox">Firefox</option>
+            <option value="Safari">Safari</option>
+          </select>
+          <div class="setting-note">TLS (JA3/JA4) + HTTP/2 отпечаток, с которым запрос уходит наверх. Смена пересоздаёт апстрим‑клиентов.</div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">Протокол и поведение</div>
+          <div class="toggles">
+            <label class="toggle" title="Принудительно HTTP/1.1 вместо согласования HTTP/2"><input type="checkbox" id="tglForceHttp1" /> <span>Принудительно HTTP/1.1</span></label>
+            <label class="toggle" title="Проходить цепочку редиректов наверху и отдавать только финальный ответ"><input type="checkbox" id="tglRedirects" /> <span>Smart Redirects</span></label>
+            <label class="toggle" title="Записывать перехваченный трафик в список"><input type="checkbox" id="tglCapture" checked /> <span>Capture</span></label>
+            <label class="toggle" title="Пассивный захват UDP (DNS/QUIC) через WinDivert — Windows, нужен админ"><input type="checkbox" id="tglUdp" /> <span>UDP (WinDivert)</span></label>
+          </div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">Корневой сертификат (CA)</div>
+          <div class="row-buttons">
+            <button class="btn" id="btnInstallCa" title="Установить CA в доверенные корневые (Windows, авто)">Install CA</button>
+            <button class="btn" id="btnCa" title="Скачать CA для ручной установки (напр. Firefox)">Download CA</button>
+          </div>
+          <div class="setting-note" id="caStoreInfo"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Requester / composer -->
+  <div id="requesterModal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head"><h3>Requester</h3><button class="x" id="cmpClose" title="Закрыть">✕</button></div>
+      <div class="modal-body">
+        <div class="cmp-line">
+          <select id="cmpMethod" class="filter-select">
+            <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
+            <option>PATCH</option><option>HEAD</option><option>OPTIONS</option>
+          </select>
+          <input id="cmpUrl" class="filter-input" placeholder="https://example.com/path" />
+          <button class="btn primary" id="cmpSend">Send</button>
+        </div>
+        <div class="setting-label">Заголовки (Name: Value, по строке)</div>
+        <textarea id="cmpHeaders" class="cmp-area" rows="6" spellcheck="false" placeholder="Accept: application/json"></textarea>
+        <div class="setting-label">Тело</div>
+        <textarea id="cmpBody" class="cmp-area" rows="6" spellcheck="false" placeholder="{ }"></textarea>
+        <div class="setting-note" id="cmpStatus">Запрос уйдёт наверх с текущим отпечатком и появится в списке как обычная сессия.</div>
       </div>
     </div>
   </div>

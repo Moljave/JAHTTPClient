@@ -54,7 +54,13 @@ public sealed record SessionDetailDto(
     string? ClientEndpoint);
 
 /// <summary>Settings echoed to / accepted from the UI.</summary>
-public sealed record SettingsDto(bool SmartRedirects, int MaxRedirects, bool Capture, string? UpstreamProxy);
+public sealed record SettingsDto(
+    bool SmartRedirects,
+    int MaxRedirects,
+    bool Capture,
+    string? UpstreamProxy,
+    string FingerprintPreset,
+    bool ForceHttp1);
 
 /// <summary>One-shot status the UI shows in the header / CA panel.</summary>
 public sealed record StatusDto(
@@ -67,7 +73,8 @@ public sealed record StatusDto(
     bool SystemProxySupported,
     bool SystemProxyEnabled,
     bool UdpSupported,
-    bool UdpRunning);
+    bool UdpRunning,
+    bool WinDivertInstalled);
 
 /// <summary>Maps capture models to the wire DTOs, decoding textual bodies for display.</summary>
 public static class DtoMapper

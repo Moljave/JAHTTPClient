@@ -27,40 +27,155 @@ namespace JASniffer.Proxy;
 /// </remarks>
 public sealed class UpstreamRelay : IDisposable
 {
-    private static readonly string PresetLabel = "Chrome 148";
-
     // Content headers must live on HttpContent, not the request; Content-Length is
     // recomputed by ByteArrayContent, so it is never forwarded verbatim.
     private static readonly HashSet<string> SkippedRequestHeaders =
         new(StringComparer.OrdinalIgnoreCase) { "Host", "Content-Length", "Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authorization" };
 
     private readonly SnifferSettings _settings;
-    private readonly TlsClientChromeHttpClient _faithful;
-    private readonly TlsClientChromeHttpClient _follow;
+    private readonly Lock _swap = new();
     private readonly ConcurrentDictionary<string, string?> _hostIpCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Swapped atomically by Reconfigure when the fingerprint preset or forced HTTP
+    // version changes (both are baked at client construction in the engine).
+    private TlsClientChromeHttpClient _faithful;
+    private TlsClientChromeHttpClient _follow;
+    private Ja3Preset _preset;
+    private bool _forceHttp1;
+
+    /// <summary>Display label for the active fingerprint preset, e.g. <c>Chrome 148</c>.</summary>
+    public string CurrentPresetLabel { get; private set; }
 
     public UpstreamRelay(SnifferSettings settings)
     {
         _settings = settings;
+        _preset = ParsePreset(settings.FingerprintPreset);
+        _forceHttp1 = settings.ForceHttp1;
+        CurrentPresetLabel = LabelFor(_preset);
+        (_faithful, _follow) = BuildClients(_preset, _forceHttp1, settings.MaxRedirects);
+    }
 
-        _faithful = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
+    /// <summary>
+    /// Rebuilds the two upstream clients with a new fingerprint preset / forced HTTP
+    /// version (no-op if unchanged). The engine bakes these at construction, so a
+    /// rebuild is required; old clients are disposed after a short grace so in-flight
+    /// requests can finish.
+    /// </summary>
+    public void Reconfigure(string presetName, bool forceHttp1)
+    {
+        var preset = ParsePreset(presetName);
+        lock (_swap)
+        {
+            if (preset == _preset && forceHttp1 == _forceHttp1)
+            {
+                return;
+            }
+
+            var (newFaithful, newFollow) = BuildClients(preset, forceHttp1, _settings.MaxRedirects);
+            var oldFaithful = _faithful;
+            var oldFollow = _follow;
+
+            _faithful = newFaithful;
+            _follow = newFollow;
+            _preset = preset;
+            _forceHttp1 = forceHttp1;
+            CurrentPresetLabel = LabelFor(preset);
+
+            _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
+            {
+                try { oldFaithful.Dispose(); oldFollow.Dispose(); } catch { /* best effort */ }
+            });
+        }
+    }
+
+    private static (TlsClientChromeHttpClient Faithful, TlsClientChromeHttpClient Follow) BuildClients(
+        Ja3Preset preset, bool forceHttp1, int maxRedirects)
+    {
+        var faithful = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
         {
             EnableJa3Fingerprinting = true,
-            FingerprintPreset = Ja3Preset.Chrome,
+            FingerprintPreset = preset,
             AllowAutoRedirect = false,
             WithoutCookieJar = true,
+            ForceHttp1 = forceHttp1,
             Timeout = TimeSpan.FromSeconds(100),
         });
 
-        _follow = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
+        var follow = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
         {
             EnableJa3Fingerprinting = true,
-            FingerprintPreset = Ja3Preset.Chrome,
+            FingerprintPreset = preset,
             AllowAutoRedirect = true,
-            MaxAutomaticRedirections = settings.MaxRedirects,
+            MaxAutomaticRedirections = maxRedirects,
             WithoutCookieJar = false,
+            ForceHttp1 = forceHttp1,
             Timeout = TimeSpan.FromSeconds(100),
         });
+
+        return (faithful, follow);
+    }
+
+    private static Ja3Preset ParsePreset(string? name)
+        => Enum.TryParse<Ja3Preset>(name, ignoreCase: true, out var preset) ? preset : Ja3Preset.Chrome;
+
+    private static string LabelFor(Ja3Preset preset) => preset switch
+    {
+        Ja3Preset.Chrome => "Chrome 148",
+        Ja3Preset.ChromeLatest => "Chrome 146",
+        Ja3Preset.Edge => "Edge",
+        Ja3Preset.Firefox => "Firefox",
+        Ja3Preset.Safari => "Safari",
+        _ => preset.ToString(),
+    };
+
+    /// <summary>
+    /// Builds and sends a request composed in the UI's Requester through the upstream
+    /// client (current fingerprint/settings), recording it as a session. Returns its id.
+    /// </summary>
+    public async Task<int> ComposeAsync(
+        SessionStore store, string method, string url, IReadOnlyList<HeaderEntry> headers, byte[] body, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
+        {
+            throw new ArgumentException("URL must be an absolute http(s) URL.");
+        }
+
+        var request = new ProxyRequest
+        {
+            Method = string.IsNullOrWhiteSpace(method) ? "GET" : method.Trim().ToUpperInvariant(),
+            Scheme = uri.Scheme,
+            Host = uri.Host,
+            Port = uri.Port,
+            Path = uri.AbsolutePath,
+            Query = uri.Query,
+            Url = uri.AbsoluteUri,
+            HttpVersion = "1.1",
+            Headers = [.. headers],
+            Body = body,
+        };
+
+        var session = new CapturedSession
+        {
+            Id = store.NextId(),
+            Method = request.Method,
+            Scheme = request.Scheme,
+            Host = request.Host,
+            Port = request.Port,
+            Path = request.Path,
+            Query = request.Query,
+            Url = request.Url,
+            RequestHttpVersion = "1.1",
+            RequestHeaders = request.Headers,
+            RequestBody = body,
+            RequestContentType = HeaderValue(request.Headers, "Content-Type"),
+            ClientEndpoint = "composer",
+            FingerprintPreset = CurrentPresetLabel,
+        };
+
+        store.Add(session);
+        await RelayAsync(request, session, ct).ConfigureAwait(false);
+        store.Update(session);
+        return session.Id;
     }
 
     /// <summary>
@@ -127,7 +242,8 @@ public sealed class UpstreamRelay : IDisposable
         session.ResponseBody = Cap(body, out var truncated);
         session.ResponseBodyTruncated = truncated;
         session.FinalUrl = response.RequestMessage?.RequestUri?.ToString() ?? request.Url;
-        session.TlsSummary = $"{PresetLabel} · HTTP/{httpVersion} · TLS 1.3 (assumed)";
+        session.FingerprintPreset = CurrentPresetLabel;
+        session.TlsSummary = $"{CurrentPresetLabel} · HTTP/{httpVersion} · TLS 1.3 (assumed)";
 
         return new RelayResult
         {
