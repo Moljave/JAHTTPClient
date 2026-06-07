@@ -79,7 +79,9 @@ api.MapPost("/settings", (SettingsDto dto, SnifferSettings s, UpstreamRelay rela
     s.UpstreamProxy = dto.UpstreamProxy;
     s.FingerprintPreset = dto.FingerprintPreset;
     s.ForceHttp1 = dto.ForceHttp1;
-    relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1); // rebuilds the upstream clients only if these changed
+    s.InterceptAllPorts = dto.InterceptAllPorts;
+    s.IgnoreUpstreamCertErrors = dto.IgnoreUpstreamCertErrors;
+    relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1, s.IgnoreUpstreamCertErrors); // rebuilds clients only if these changed
     SettingsFile.Save(s, settingsPath);
     return Settings(s);
 });
@@ -233,7 +235,8 @@ static IResult ServeBody(byte[] body, string? contentType, string name, bool dow
 }
 
 static SettingsDto Settings(SnifferSettings s) =>
-    new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.FingerprintPreset, s.ForceHttp1);
+    new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.FingerprintPreset, s.ForceHttp1,
+        s.InterceptAllPorts, s.IgnoreUpstreamCertErrors);
 
 // Parses a "Name: Value" per-line header block (as typed in the Requester) into
 // ordered header entries.

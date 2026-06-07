@@ -431,6 +431,8 @@
     $("#tglUdp").addEventListener("change", onUdpToggle);
     $("#selPreset").addEventListener("change", saveSettings);
     $("#tglForceHttp1").addEventListener("change", saveSettings);
+    $("#tglInterceptAll").addEventListener("change", saveSettings);
+    $("#tglInsecure").addEventListener("change", saveSettings);
     $("#btnSelftest").addEventListener("click", runSelfTest);
 
     $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
@@ -478,6 +480,8 @@
       upstreamProxy: null,
       fingerprintPreset: $("#selPreset").value,
       forceHttp1: $("#tglForceHttp1").checked,
+      interceptAllPorts: $("#tglInterceptAll").checked,
+      ignoreUpstreamCertErrors: $("#tglInsecure").checked,
     };
     await postJson("/api/settings", dto);
     const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
@@ -744,6 +748,8 @@
       $("#tglRedirects").checked = s.smartRedirects;
       $("#tglCapture").checked = s.capture;
       $("#tglForceHttp1").checked = s.forceHttp1;
+      $("#tglInterceptAll").checked = s.interceptAllPorts;
+      $("#tglInsecure").checked = s.ignoreUpstreamCertErrors;
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
       const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
       if (label) $("#presetLabel").textContent = label;

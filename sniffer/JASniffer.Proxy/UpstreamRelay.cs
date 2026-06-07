@@ -43,6 +43,7 @@ public sealed class UpstreamRelay : IDisposable
     private TlsClientChromeHttpClient _follow;
     private Ja3Preset _preset;
     private bool _forceHttp1;
+    private bool _insecure;
 
     /// <summary>Display label for the active fingerprint preset, e.g. <c>Chrome 148</c>.</summary>
     public string CurrentPresetLabel { get; private set; }
@@ -52,27 +53,28 @@ public sealed class UpstreamRelay : IDisposable
         _settings = settings;
         _preset = ParsePreset(settings.FingerprintPreset);
         _forceHttp1 = settings.ForceHttp1;
+        _insecure = settings.IgnoreUpstreamCertErrors;
         CurrentPresetLabel = LabelFor(_preset);
-        (_faithful, _follow) = BuildClients(_preset, _forceHttp1, settings.MaxRedirects);
+        (_faithful, _follow) = BuildClients(_preset, _forceHttp1, _insecure, settings.MaxRedirects);
     }
 
     /// <summary>
     /// Rebuilds the two upstream clients with a new fingerprint preset / forced HTTP
-    /// version (no-op if unchanged). The engine bakes these at construction, so a
-    /// rebuild is required; old clients are disposed after a short grace so in-flight
-    /// requests can finish.
+    /// version / cert-verification setting (no-op if unchanged). The engine bakes
+    /// these at construction, so a rebuild is required; old clients are disposed after
+    /// a short grace so in-flight requests can finish.
     /// </summary>
-    public void Reconfigure(string presetName, bool forceHttp1)
+    public void Reconfigure(string presetName, bool forceHttp1, bool insecure)
     {
         var preset = ParsePreset(presetName);
         lock (_swap)
         {
-            if (preset == _preset && forceHttp1 == _forceHttp1)
+            if (preset == _preset && forceHttp1 == _forceHttp1 && insecure == _insecure)
             {
                 return;
             }
 
-            var (newFaithful, newFollow) = BuildClients(preset, forceHttp1, _settings.MaxRedirects);
+            var (newFaithful, newFollow) = BuildClients(preset, forceHttp1, insecure, _settings.MaxRedirects);
             var oldFaithful = _faithful;
             var oldFollow = _follow;
 
@@ -80,6 +82,7 @@ public sealed class UpstreamRelay : IDisposable
             _follow = newFollow;
             _preset = preset;
             _forceHttp1 = forceHttp1;
+            _insecure = insecure;
             CurrentPresetLabel = LabelFor(preset);
 
             _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
@@ -90,7 +93,7 @@ public sealed class UpstreamRelay : IDisposable
     }
 
     private static (TlsClientChromeHttpClient Faithful, TlsClientChromeHttpClient Follow) BuildClients(
-        Ja3Preset preset, bool forceHttp1, int maxRedirects)
+        Ja3Preset preset, bool forceHttp1, bool insecure, int maxRedirects)
     {
         var faithful = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
         {
@@ -99,6 +102,7 @@ public sealed class UpstreamRelay : IDisposable
             AllowAutoRedirect = false,
             WithoutCookieJar = true,
             ForceHttp1 = forceHttp1,
+            InsecureSkipVerify = insecure,
             Timeout = TimeSpan.FromSeconds(100),
         });
 
@@ -110,6 +114,7 @@ public sealed class UpstreamRelay : IDisposable
             MaxAutomaticRedirections = maxRedirects,
             WithoutCookieJar = false,
             ForceHttp1 = forceHttp1,
+            InsecureSkipVerify = insecure,
             Timeout = TimeSpan.FromSeconds(100),
         });
 

@@ -60,7 +60,9 @@ public sealed record SettingsDto(
     bool Capture,
     string? UpstreamProxy,
     string FingerprintPreset,
-    bool ForceHttp1);
+    bool ForceHttp1,
+    bool InterceptAllPorts,
+    bool IgnoreUpstreamCertErrors);
 
 /// <summary>One-shot status the UI shows in the header / CA panel.</summary>
 public sealed record StatusDto(

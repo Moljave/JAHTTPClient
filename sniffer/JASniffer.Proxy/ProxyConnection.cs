@@ -107,9 +107,9 @@ internal sealed class ProxyConnection(
         await stream.WriteAsync(Encoding.Latin1.GetBytes("HTTP/1.1 200 Connection Established\r\n\r\n"), ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
 
-        if (!MitmPorts.Contains(port))
+        if (!MitmPorts.Contains(port) && !settings.InterceptAllPorts)
         {
-            // Non-HTTP port (or opaque): raw tunnel, no inspection.
+            // Non-HTTP port (or opaque) and all-port interception is off: raw tunnel.
             await TunnelRawAsync(stream, reader, host, port, "CONNECT", ct).ConfigureAwait(false);
             return;
         }

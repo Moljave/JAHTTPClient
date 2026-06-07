@@ -148,6 +148,8 @@
         <div class="setting">
           <div class="setting-label">Протокол и поведение</div>
           <div class="toggles">
+            <label class="toggle" title="Перехватывать (MITM) HTTPS на любом порту, а не только 443/8443 — нужно для локальных dev‑серверов на нестандартных портах"><input type="checkbox" id="tglInterceptAll" checked /> <span>Перехват HTTPS на всех портах</span></label>
+            <label class="toggle" title="Не проверять сертификат апстрим‑сервера — для локальных dev‑серверов с самоподписанными сертификатами"><input type="checkbox" id="tglInsecure" /> <span>Игнорировать ошибки сертификата апстрима</span></label>
             <label class="toggle" title="Принудительно HTTP/1.1 вместо согласования HTTP/2"><input type="checkbox" id="tglForceHttp1" /> <span>Принудительно HTTP/1.1</span></label>
             <label class="toggle" title="Проходить цепочку редиректов наверху и отдавать только финальный ответ"><input type="checkbox" id="tglRedirects" /> <span>Smart Redirects</span></label>
             <label class="toggle" title="Записывать перехваченный трафик в список"><input type="checkbox" id="tglCapture" checked /> <span>Capture</span></label>

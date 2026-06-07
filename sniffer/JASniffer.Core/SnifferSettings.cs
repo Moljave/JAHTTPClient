@@ -13,6 +13,8 @@ public sealed class SnifferSettings
     private volatile string? _upstreamProxy;
     private volatile string _fingerprintPreset = "Chrome";
     private volatile bool _forceHttp1;
+    private volatile bool _interceptAllPorts = true;
+    private volatile bool _ignoreUpstreamCertErrors;
 
     /// <summary>
     /// When false (default, most faithful), the browser receives raw 3xx responses
@@ -63,6 +65,29 @@ public sealed class SnifferSettings
     {
         get => _forceHttp1;
         set => _forceHttp1 = value;
+    }
+
+    /// <summary>
+    /// Intercept (MITM) HTTPS on every CONNECT port, not just 443/8443 — needed to
+    /// sniff local dev servers on non-standard ports (e.g. 3000, 5173, 9443).
+    /// Defaults to true. Browser CONNECTs are always TLS, so this is safe for browser
+    /// traffic; turn it off to raw-tunnel non-standard ports (for non-HTTP services).
+    /// </summary>
+    public bool InterceptAllPorts
+    {
+        get => _interceptAllPorts;
+        set => _interceptAllPorts = value;
+    }
+
+    /// <summary>
+    /// Don't verify the upstream server's TLS certificate — lets the proxy reach
+    /// local dev servers (and others) with self-signed/invalid certificates without
+    /// failing. Defaults to false; enable only when debugging trusted endpoints.
+    /// </summary>
+    public bool IgnoreUpstreamCertErrors
+    {
+        get => _ignoreUpstreamCertErrors;
+        set => _ignoreUpstreamCertErrors = value;
     }
 
     /// <summary>
