@@ -18,6 +18,8 @@ builder.WebHost.UseUrls($"http://localhost:{uiPort}");
 
 // ---- services --------------------------------------------------------------
 var settings = new SnifferSettings { SelfUiPort = uiPort };
+var settingsPath = Path.Combine(caDir ?? CertificateAuthority.DefaultStoreDirectory, "settings.json");
+SettingsFile.Apply(settings, settingsPath); // restore persisted preset/redirects/etc.
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<SessionStore>();
 builder.Services.AddSingleton(CertificateAuthority.LoadOrCreate(caDir));
@@ -78,6 +80,7 @@ api.MapPost("/settings", (SettingsDto dto, SnifferSettings s, UpstreamRelay rela
     s.FingerprintPreset = dto.FingerprintPreset;
     s.ForceHttp1 = dto.ForceHttp1;
     relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1); // rebuilds the upstream clients only if these changed
+    SettingsFile.Save(s, settingsPath);
     return Settings(s);
 });
 
@@ -105,6 +108,9 @@ api.MapGet("/sessions/{id:int}/response-body", (int id, SessionStore store, bool
         ? Results.NotFound()
         : ServeBody(session.ResponseBody, session.ResponseContentType, $"response-{id}", download);
 });
+
+api.MapDelete("/sessions/{id:int}", (int id, SessionStore store) =>
+    store.Remove(id) ? Results.NoContent() : Results.NotFound());
 
 api.MapPost("/clear", (SessionStore store) =>
 {

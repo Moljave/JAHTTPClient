@@ -5,6 +5,7 @@ using JAHTTPClient;
 using JAHTTPClient.Fingerprinting;
 using JASniffer.Core;
 using JASniffer.Core.Models;
+using JASniffer.Core.Parsing;
 
 namespace JASniffer.Proxy;
 
@@ -174,7 +175,7 @@ public sealed class UpstreamRelay : IDisposable
             RequestHttpVersion = "1.1",
             RequestHeaders = request.Headers,
             RequestBody = body,
-            RequestContentType = HeaderValue(request.Headers, "Content-Type"),
+            RequestContentType = HttpParsing.FirstHeader(request.Headers, "Content-Type"),
             ClientEndpoint = "composer",
             FingerprintPreset = CurrentPresetLabel,
         };
@@ -234,7 +235,7 @@ public sealed class UpstreamRelay : IDisposable
         ProxyRequest request, CapturedSession session, HttpResponseMessage response, byte[] body, double elapsedMs)
     {
         var responseHeaders = CollectResponseHeaders(response);
-        var contentType = HeaderValue(responseHeaders, "Content-Type");
+        var contentType = HttpParsing.FirstHeader(responseHeaders, "Content-Type");
         var httpVersion = response.Version.Major >= 2 ? "2.0" : "1.1";
 
         session.DurationMs = elapsedMs;
@@ -359,18 +360,6 @@ public sealed class UpstreamRelay : IDisposable
         return headers;
     }
 
-    private static string? HeaderValue(List<HeaderEntry> headers, string name)
-    {
-        foreach (var h in headers)
-        {
-            if (h.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            {
-                return h.Value;
-            }
-        }
-
-        return null;
-    }
 
     private static bool IsContentHeader(string name)
         => name.StartsWith("Content-", StringComparison.OrdinalIgnoreCase);

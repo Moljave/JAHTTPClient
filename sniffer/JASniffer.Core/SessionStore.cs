@@ -90,6 +90,31 @@ public sealed class SessionStore(SnifferSettings settings)
         }
     }
 
+    /// <summary>Removes a single session by id (UI delete). Returns false if it wasn't present.</summary>
+    public bool Remove(int id)
+    {
+        CapturedSession? removed;
+        lock (_gate)
+        {
+            if (!_byId.Remove(id, out removed))
+            {
+                return false;
+            }
+
+            // The order queue has no random removal; rebuild it without the id.
+            // Cheap: this only runs on an explicit user delete, not the hot path.
+            var kept = _order.Where(x => x != id).ToArray();
+            _order.Clear();
+            foreach (var x in kept)
+            {
+                _order.Enqueue(x);
+            }
+        }
+
+        SessionChanged?.Invoke(removed!, SessionChangeKind.Removed);
+        return true;
+    }
+
     /// <summary>Drops every captured session (the UI "Clear" button). Id numbering continues.</summary>
     public void Clear()
     {
@@ -116,5 +141,6 @@ public enum SessionChangeKind
 {
     Added,
     Updated,
+    Removed,
     Cleared,
 }

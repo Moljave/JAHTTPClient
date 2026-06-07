@@ -212,3 +212,27 @@ pre.raw { margin: 0; white-space: pre-wrap; word-break: break-word; font-family:
 .cmp-line .filter-input { flex: 1; }
 .cmp-area { width: 100%; background: var(--bg-3); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; color: var(--text); font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; resize: vertical; }
 .cmp-area:focus { outline: none; border-color: var(--accent); }
+
+/* right-click context menu */
+.ctx { position: fixed; z-index: 70; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px; min-width: 190px; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+.ctx.hidden { display: none; }
+.ctx-item { padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+.ctx-item:hover { background: var(--bg-3); }
+.ctx-item.danger { color: var(--red); }
+.ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+
+/* toast */
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--bg-3); border: 1px solid var(--line); color: var(--text); padding: 8px 16px; border-radius: 8px; z-index: 80; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.toast.hidden { display: none; }
+
+/* mini button in inspector head */
+.mini-btn { margin-left: auto; background: var(--bg-3); border: 1px solid var(--line); color: var(--muted); padding: 2px 9px; border-radius: 6px; cursor: pointer; font-size: 11px; }
+.mini-btn:hover { color: var(--text); border-color: var(--accent); }
+
+/* empty state / onboarding */
+.grid-empty { position: absolute; inset: 0; padding: 28px 22px; overflow: auto; }
+.grid-empty.hidden { display: none; }
+.onboard { max-width: 580px; color: var(--text); }
+.onboard-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+.onboard ol { line-height: 1.75; padding-left: 20px; margin: 0 0 6px; }
+.onboard .muted { margin-top: 16px; font-size: 12px; }

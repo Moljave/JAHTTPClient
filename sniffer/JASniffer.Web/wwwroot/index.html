@@ -53,6 +53,7 @@
       </div>
       <div class="grid-scroll" id="gridScroll">
         <div class="grid-rows" id="gridRows"></div>
+        <div id="gridEmpty" class="grid-empty hidden"></div>
       </div>
     </section>
 
@@ -64,6 +65,7 @@
         <div class="inspect-head">
           <span class="inspect-title">Request</span>
           <span id="reqBadges" class="badges"></span>
+          <button id="btnReqCurl" class="mini-btn" title="Скопировать запрос как cURL">cURL</button>
         </div>
         <nav class="tabs" id="reqTabs">
           <button class="tab active" data-tab="headers">Headers</button>
@@ -73,7 +75,7 @@
           <button class="tab" data-tab="raw">Raw</button>
           <button class="tab" data-tab="body">Body</button>
         </nav>
-        <div class="tab-body" id="reqBody"><div class="empty">Select a session to inspect.</div></div>
+        <div class="tab-body" id="reqBody"><div class="empty">Выберите сессию для просмотра.</div></div>
       </div>
 
       <div class="inspect-divider" id="inspectDivider"></div>
@@ -90,7 +92,7 @@
           <button class="tab" data-tab="preview">Preview</button>
           <button class="tab" data-tab="body">Body</button>
         </nav>
-        <div class="tab-body" id="resBody"><div class="empty">Select a session to inspect.</div></div>
+        <div class="tab-body" id="resBody"><div class="empty">Выберите сессию для просмотра.</div></div>
       </div>
     </section>
   </main>
@@ -186,6 +188,9 @@
       </div>
     </div>
   </div>
+
+  <div id="ctxMenu" class="ctx hidden"></div>
+  <div id="toast" class="toast hidden"></div>
 
   <script src="lib/signalr.min.js"></script>
   <script src="app.js"></script>

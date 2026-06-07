@@ -57,6 +57,44 @@
     return ct.includes("json") ? r.json() : r.text();
   }
 
+  const getJson = (path) => api(path);
+  const postJson = (path, body) =>
+    api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+        return true;
+      } catch { return false; }
+    }
+  }
+
+  let toastTimer;
+  function flash(msg) {
+    const t = $("#toast");
+    t.textContent = msg; t.classList.remove("hidden");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.add("hidden"), 1600);
+  }
+
+  // Reproduces the request as a direct curl command (single-quote escaped).
+  function buildCurl(d) {
+    const s = d.summary;
+    const q = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
+    let c = "curl " + q(s.url);
+    if (s.method && s.method !== "GET") c += " -X " + s.method;
+    for (const h of d.requestHeaders) {
+      if (h.name.toLowerCase() === "content-length") continue; // curl recomputes
+      c += " \\\n  -H " + q(h.name + ": " + h.value);
+    }
+    if (d.requestBody && d.requestBody.isText && d.requestBody.text) c += " \\\n  --data-raw " + q(d.requestBody.text);
+    return c;
+  }
+
   // ---- ingest / filter -----------------------------------------------------
   function upsert(s) {
     if (!state.sessions.has(s.id)) state.ids.push(s.id);
@@ -101,6 +139,7 @@
       if (follow) el.gridScroll.scrollTop = el.gridScroll.scrollHeight;
       renderVisible();
       updateCounts();
+      updateEmptyState();
     });
   }
 
@@ -139,7 +178,7 @@
   }
 
   function updateCounts() {
-    el.counts.textContent = `${state.filtered.length} of ${state.ids.length} sessions`;
+    el.counts.textContent = `${state.filtered.length} из ${state.ids.length} сессий`;
   }
 
   // ---- selection + inspectors ---------------------------------------------
@@ -150,7 +189,7 @@
       state.detail = await api(`/api/sessions/${id}`);
       renderInspectors();
     } catch {
-      el.reqBody.innerHTML = el.resBody.innerHTML = `<div class="empty">Session no longer available.</div>`;
+      el.reqBody.innerHTML = el.resBody.innerHTML = `<div class="empty">Сессия больше недоступна.</div>`;
     }
   }
 
@@ -171,8 +210,8 @@
     el.resBadges.innerHTML = statusBadge +
       (s.wasTunneled ? "" : `<span class="badge b-muted">${httpLabel(s.responseHttpVersion)}</span>`) +
       (s.wasTunneled ? "" : `<span class="badge b-muted">BODY: ${formatBytes(s.bodyLength)}</span>`) +
-      (d.tlsSummary ? `<span class="badge b-green" title="Derived from the active preset; the upstream TLS version is not surfaced">${escapeHtml(d.tlsSummary)}</span>` : "") +
-      (s.followedRedirects && s.finalUrl && s.finalUrl !== s.url ? `<span class="badge b-blue" title="${escapeHtml(s.finalUrl)}">→ redirected</span>` : "");
+      (d.tlsSummary ? `<span class="badge b-green" title="Производное от активного пресета; реальная версия TLS апстрима не раскрывается">${escapeHtml(d.tlsSummary)}</span>` : "") +
+      (s.followedRedirects && s.finalUrl && s.finalUrl !== s.url ? `<span class="badge b-blue" title="${escapeHtml(s.finalUrl)}">→ редирект</span>` : "");
 
     setCount(el.reqTabs, "headers", d.requestHeaders.length);
     setCount(el.reqTabs, "params", d.queryParams.length);
@@ -200,8 +239,8 @@
     let html;
     switch (tab) {
       case "headers": html = kvTable(d.requestHeaders.map((h) => [h.name, h.value]), true); break;
-      case "params": html = d.queryParams.length ? kvTable(d.queryParams.map((p) => [p.name, p.value])) : note("No query parameters."); break;
-      case "cookies": html = d.requestCookies.length ? kvTable(d.requestCookies.map((c) => [c.name, c.value])) : note("No request cookies."); break;
+      case "params": html = d.queryParams.length ? kvTable(d.queryParams.map((p) => [p.name, p.value])) : note("Нет query-параметров."); break;
+      case "cookies": html = d.requestCookies.length ? kvTable(d.requestCookies.map((c) => [c.name, c.value])) : note("Нет cookie запроса."); break;
       case "auth": html = renderAuth(d); break;
       case "raw": html = `<pre class="raw">${escapeHtml(buildRaw(d, false))}</pre>`; break;
       case "body": html = renderBody(d.requestBody, d.summary.id, "request"); break;
@@ -233,16 +272,16 @@
   const note = (t) => `<div class="note">${escapeHtml(t)}</div>`;
 
   function kvTable(pairs, withFilter) {
-    if (!pairs.length) return note("Nothing here.");
+    if (!pairs.length) return note("Пусто.");
     const rows = pairs.map(([k, v]) =>
       `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`).join("");
-    const filter = withFilter ? `<input class="kv-filter" id="kvFilter" placeholder="Filter headers…" />` : "";
+    const filter = withFilter ? `<input class="kv-filter" id="kvFilter" placeholder="Фильтр заголовков…" />` : "";
     return filter + `<table class="kv">${rows}</table>`;
   }
 
   function renderAuth(d) {
     const a = d.auth;
-    if (!a) return note("No Authorization header.");
+    if (!a) return note("Нет заголовка Authorization.");
     let rows = `<tr><td class="k">Scheme</td><td class="v">${escapeHtml(a.scheme)}</td></tr>`;
     if (a.username != null) rows += `<tr><td class="k">Username</td><td class="v">${escapeHtml(a.username)}</td></tr>`;
     if (a.password != null) rows += `<tr><td class="k">Password</td><td class="v">${escapeHtml(a.password)}</td></tr>`;
@@ -251,7 +290,7 @@
   }
 
   function renderResCookies(d) {
-    if (!d.responseCookies.length) return note("No Set-Cookie headers.");
+    if (!d.responseCookies.length) return note("Нет заголовков Set-Cookie.");
     const rows = d.responseCookies.map((c) => {
       const attrs = [c.domain && "domain=" + c.domain, c.path && "path=" + c.path, c.expires && "expires=" + c.expires,
         c.maxAge && "max-age=" + c.maxAge, c.secure && "Secure", c.httpOnly && "HttpOnly", c.sameSite && "SameSite=" + c.sameSite]
@@ -285,20 +324,20 @@
 
   function renderPreview(d) {
     const b = d.responseBody, id = d.summary.id;
-    if (d.summary.wasTunneled) return note("Tunneled session — not inspected.");
-    if (!b || b.size === 0) return note("No response body.");
+    if (d.summary.wasTunneled) return note("Туннелированная сессия — не инспектируется.");
+    if (!b || b.size === 0) return note("Нет тела ответа.");
     if (b.kind === "image") return `<img class="preview-img" src="/api/sessions/${id}/response-body" alt="response image" />`;
     if (b.kind === "html") return `<iframe class="preview-frame" sandbox="" src="/api/sessions/${id}/response-body"></iframe>`;
     if (b.kind === "json" && b.text != null) return `<pre class="raw">${jsonHighlight(b.text)}</pre>`;
     if (b.isText && b.text != null) return `<pre class="raw">${escapeHtml(b.text)}</pre>`;
-    return `<div class="note">Binary ${escapeHtml(b.kind)} · ${formatBytes(b.size)} · <span class="dl" data-dl="response" data-id="${id}">download</span></div><div class="hexdump" data-hex="response" data-id="${id}">loading…</div>`;
+    return `<div class="note">Бинарные данные ${escapeHtml(b.kind)} · ${formatBytes(b.size)} · <span class="dl" data-dl="response" data-id="${id}">скачать</span></div><div class="hexdump" data-hex="response" data-id="${id}">загрузка…</div>`;
   }
 
   function renderBody(b, id, dir) {
-    if (!b || b.size === 0) return note("No body.");
-    const head = `<div class="section-label">${escapeHtml(b.kind)} · ${formatBytes(b.size)}${b.truncated ? " · truncated" : ""} · <span class="dl" data-dl="${dir}" data-id="${id}">download</span></div>`;
+    if (!b || b.size === 0) return note("Нет тела.");
+    const head = `<div class="section-label">${escapeHtml(b.kind)} · ${formatBytes(b.size)}${b.truncated ? " · обрезано" : ""} · <span class="dl" data-dl="${dir}" data-id="${id}">скачать</span></div>`;
     if (b.isText && b.text != null) return head + `<pre class="raw">${escapeHtml(b.text)}</pre>`;
-    return head + `<div class="hexdump" data-hex="${dir}" data-id="${id}">loading…</div>`;
+    return head + `<div class="hexdump" data-hex="${dir}" data-id="${id}">загрузка…</div>`;
   }
 
   function afterRender(container, id, dir) {
@@ -320,7 +359,7 @@
       const r = await fetch(`/api/sessions/${node.dataset.id}/${node.dataset.hex}-body`);
       const buf = new Uint8Array(await r.arrayBuffer());
       node.textContent = hexDump(buf, 4096);
-    } catch { node.textContent = "(unable to load body)"; }
+    } catch { node.textContent = "(не удалось загрузить тело)"; }
   }
 
   function hexDump(bytes, max) {
@@ -407,6 +446,27 @@
     el.filterStatus.addEventListener("change", () => { state.filter.status = el.filterStatus.value; scheduleRender(); });
     el.filterType.addEventListener("change", () => { state.filter.type = el.filterType.value; scheduleRender(); });
 
+    // context menu + copy-as-cURL + keyboard
+    el.gridRows.addEventListener("contextmenu", (e) => {
+      const row = e.target.closest(".grid-row");
+      if (!row) return;
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, +row.dataset.id);
+    });
+    $("#ctxMenu").addEventListener("click", (e) => {
+      const act = e.target.dataset.act;
+      if (!act) return;
+      const id = +$("#ctxMenu").dataset.id;
+      hideContextMenu();
+      ctxAction(act, id);
+    });
+    document.addEventListener("click", (e) => { if (!e.target.closest("#ctxMenu")) hideContextMenu(); });
+    el.gridScroll.addEventListener("scroll", hideContextMenu);
+    document.addEventListener("keydown", onKeyDown);
+    $("#btnReqCurl").addEventListener("click", async () => {
+      if (state.detail && await copyText(buildCurl(state.detail))) flash("cURL скопирован");
+    });
+
     initDividers();
   }
 
@@ -419,7 +479,7 @@
       fingerprintPreset: $("#selPreset").value,
       forceHttp1: $("#tglForceHttp1").checked,
     };
-    await api("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(dto) });
+    await postJson("/api/settings", dto);
     const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
     $("#presetLabel").textContent = label;
   }
@@ -444,9 +504,8 @@
   function closeModal(id) { $("#" + id).classList.add("hidden"); }
 
   async function udpCall(enabled) {
-    try {
-      return await api("/api/udp-capture", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) });
-    } catch { return { running: false, supported: false, error: "request failed" }; }
+    try { return await postJson("/api/udp-capture", { enabled }); }
+    catch { return { running: false, supported: false, error: "request failed" }; }
   }
 
   async function onUdpToggle(e) {
@@ -466,12 +525,7 @@
   }
 
   function prefillRequester() {
-    if (!state.detail || $("#cmpUrl").value.trim()) return; // keep manual edits
-    const d = state.detail;
-    $("#cmpMethod").value = (d.summary.method || "GET").toUpperCase();
-    $("#cmpUrl").value = d.summary.url || "";
-    $("#cmpHeaders").value = d.requestHeaders.map((h) => h.name + ": " + h.value).join("\n");
-    $("#cmpBody").value = d.requestBody && d.requestBody.isText && d.requestBody.text ? d.requestBody.text : "";
+    if (state.detail && !$("#cmpUrl").value.trim()) fillComposer(state.detail);
   }
 
   async function sendComposer() {
@@ -521,16 +575,126 @@
     });
   }
 
+  // ---- session ops: context menu, copy, replay, remove, keyboard ----------
+  function clearInspectors() {
+    el.reqBody.innerHTML = el.resBody.innerHTML = `<div class="empty">Выберите сессию для просмотра.</div>`;
+    el.reqBadges.innerHTML = el.resBadges.innerHTML = "";
+  }
+
+  function removeLocal(id) {
+    if (!state.sessions.has(id)) return;
+    state.sessions.delete(id);
+    const i = state.ids.indexOf(id);
+    if (i >= 0) state.ids.splice(i, 1);
+    if (state.selectedId === id) { state.selectedId = null; state.detail = null; clearInspectors(); }
+    scheduleRender();
+  }
+
+  async function removeSession(id) {
+    try { await fetch(`/api/sessions/${id}`, { method: "DELETE" }); } catch { /* removed locally regardless */ }
+    removeLocal(id);
+  }
+
+  function fillComposer(d) {
+    $("#cmpMethod").value = (d.summary.method || "GET").toUpperCase();
+    $("#cmpUrl").value = d.summary.url || "";
+    $("#cmpHeaders").value = d.requestHeaders.map((h) => h.name + ": " + h.value).join("\n");
+    $("#cmpBody").value = d.requestBody && d.requestBody.isText && d.requestBody.text ? d.requestBody.text : "";
+    $("#cmpStatus").textContent = "";
+  }
+
+  function hideContextMenu() { $("#ctxMenu").classList.add("hidden"); }
+
+  function showContextMenu(x, y, id) {
+    const m = $("#ctxMenu");
+    m.innerHTML =
+      `<div class="ctx-item" data-act="copyurl">Копировать URL</div>` +
+      `<div class="ctx-item" data-act="copycurl">Копировать как cURL</div>` +
+      `<div class="ctx-item" data-act="replay">Повторить в Requester</div>` +
+      `<div class="ctx-sep"></div>` +
+      `<div class="ctx-item danger" data-act="remove">Удалить сессию</div>`;
+    m.dataset.id = id;
+    m.classList.remove("hidden");
+    m.style.left = Math.min(x, window.innerWidth - m.offsetWidth - 6) + "px";
+    m.style.top = Math.min(y, window.innerHeight - m.offsetHeight - 6) + "px";
+  }
+
+  async function ctxAction(act, id) {
+    if (act === "remove") { removeSession(id); return; }
+    if (act === "copyurl") {
+      const s = state.sessions.get(id);
+      if (s && await copyText(s.url)) flash("URL скопирован");
+      return;
+    }
+    let d;
+    try { d = await getJson(`/api/sessions/${id}`); } catch { return; }
+    if (act === "copycurl") { if (await copyText(buildCurl(d))) flash("cURL скопирован"); }
+    else if (act === "replay") { fillComposer(d); openModal("requesterModal"); }
+  }
+
+  function moveSelection(delta) {
+    const list = state.filtered;
+    if (!list.length) return;
+    let idx = list.indexOf(state.selectedId);
+    idx = idx < 0 ? (delta > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, idx + delta));
+    selectSession(list[idx]);
+    ensureRowVisible(idx);
+  }
+
+  function ensureRowVisible(idx) {
+    const top = idx * ROW_H, bottom = top + ROW_H;
+    const vt = el.gridScroll.scrollTop, vb = vt + el.gridScroll.clientHeight;
+    if (top < vt) el.gridScroll.scrollTop = top;
+    else if (bottom > vb) el.gridScroll.scrollTop = bottom - el.gridScroll.clientHeight;
+    renderVisible();
+  }
+
+  function onboardingHtml() {
+    const p = state.proxyPort || 8866;
+    return `<div class="onboard">
+      <div class="onboard-title">Сессий пока нет</div>
+      <ol>
+        <li>В <b>⚙ Settings</b> нажмите <b>Install CA</b> (Windows) или <b>Download CA</b> и установите как доверенный корневой сертификат.</li>
+        <li>Выберите режим <b>System</b> (Windows) или направьте браузер/приложение на прокси <code>127.0.0.1:${p}</code>.</li>
+        <li>Откройте любой сайт — сессии появятся здесь вживую.</li>
+      </ol>
+      <div class="muted">Горячие клавиши: <b>↑/↓</b> — навигация, <b>Del</b> — удалить, <b>/</b> — фильтр, ПКМ по строке — меню.</div>
+    </div>`;
+  }
+
+  function updateEmptyState() {
+    const empty = $("#gridEmpty");
+    if (state.ids.length === 0) { empty.innerHTML = onboardingHtml(); empty.classList.remove("hidden"); }
+    else if (state.filtered.length === 0) { empty.innerHTML = `<div class="empty">Нет совпадений по фильтру.</div>`; empty.classList.remove("hidden"); }
+    else empty.classList.add("hidden");
+  }
+
+  const anyModalOpen = () =>
+    !$("#settingsModal").classList.contains("hidden") || !$("#requesterModal").classList.contains("hidden");
+
+  function onKeyDown(e) {
+    if (e.key === "Escape") { closeModal("settingsModal"); closeModal("requesterModal"); hideContextMenu(); return; }
+    const tag = document.activeElement && document.activeElement.tagName;
+    const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    if (!inField && !anyModalOpen() && (e.key === "/" || (e.ctrlKey && (e.key === "f" || e.key === "F")))) {
+      e.preventDefault(); el.filterText.focus(); el.filterText.select(); return;
+    }
+    if (inField || anyModalOpen() || !$("#ctxMenu").classList.contains("hidden")) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); moveSelection(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveSelection(-1); }
+    else if (e.key === "Delete" && state.selectedId != null) { e.preventDefault(); removeSession(state.selectedId); }
+  }
+
   // ---- bootstrap -----------------------------------------------------------
   function setDot(on) { el.connDot.className = "dot " + (on ? "dot-on" : "dot-off"); }
 
   function connectHub() {
     const conn = new signalR.HubConnectionBuilder().withUrl("/hub/sessions").withAutomaticReconnect().build();
-    conn.on("sessions", (batch) => { for (const s of batch) upsert(s); if (state.detail && batch.some((b) => b.id === state.detail.summary.id)) { /* keep open */ } scheduleRender(); });
+    conn.on("sessions", (batch) => { for (const s of batch) upsert(s); scheduleRender(); });
+    conn.on("removed", (ids) => { for (const id of ids) removeLocal(id); });
     conn.on("cleared", () => {
       state.sessions.clear(); state.ids = []; state.filtered = []; state.selectedId = null; state.detail = null;
-      el.reqBody.innerHTML = el.resBody.innerHTML = `<div class="empty">Select a session to inspect.</div>`;
-      el.reqBadges.innerHTML = el.resBadges.innerHTML = "";
+      clearInspectors();
       scheduleRender();
     });
     conn.onreconnected(() => setDot(true));
@@ -549,7 +713,7 @@
       return;
     }
     try {
-      const r = await api("/api/system-proxy", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: mode === "system" }) });
+      const r = await postJson("/api/system-proxy", { enabled: mode === "system" });
       setActiveMode(r.enabled ? "system" : "manual");
       if (mode === "system" && !r.enabled) alert("Не удалось включить системный прокси.");
     } catch { /* ignore */ }

@@ -29,14 +29,12 @@ public sealed class SessionBroadcaster : BackgroundService
     }
 
     private void OnSessionChanged(CapturedSession session, SessionChangeKind kind)
-    {
-        var signal = kind == SessionChangeKind.Cleared ? Signal.Clear() : Signal.For(session);
-        _channel.Writer.TryWrite(signal);
-    }
+        => _channel.Writer.TryWrite(new Signal(session, kind));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var pending = new Dictionary<int, SessionSummaryDto>();
+        var removed = new HashSet<int>();
         var reader = _channel.Reader;
 
         try
@@ -44,26 +42,43 @@ public sealed class SessionBroadcaster : BackgroundService
             while (await reader.WaitToReadAsync(stoppingToken).ConfigureAwait(false))
             {
                 pending.Clear();
+                removed.Clear();
                 var cleared = false;
 
                 // Drain everything currently queued, collapsing repeated updates of
                 // the same session to its latest summary.
                 while (reader.TryRead(out var signal) && pending.Count < MaxBatch)
                 {
-                    if (signal.Cleared)
+                    switch (signal.Kind)
                     {
-                        cleared = true;
-                        pending.Clear();
-                    }
-                    else if (signal.Session is { } s)
-                    {
-                        pending[s.Id] = DtoMapper.ToSummary(s);
+                        case SessionChangeKind.Cleared:
+                            cleared = true;
+                            pending.Clear();
+                            removed.Clear();
+                            break;
+                        case SessionChangeKind.Removed when signal.Session is { } r:
+                            pending.Remove(r.Id);
+                            removed.Add(r.Id);
+                            break;
+                        default:
+                            if (signal.Session is { } s)
+                            {
+                                pending[s.Id] = DtoMapper.ToSummary(s);
+                                removed.Remove(s.Id);
+                            }
+
+                            break;
                     }
                 }
 
                 if (cleared)
                 {
                     await _hub.Clients.All.SendAsync("cleared", stoppingToken).ConfigureAwait(false);
+                }
+
+                if (removed.Count > 0)
+                {
+                    await _hub.Clients.All.SendAsync("removed", removed.ToArray(), stoppingToken).ConfigureAwait(false);
                 }
 
                 if (pending.Count > 0)
@@ -86,9 +101,5 @@ public sealed class SessionBroadcaster : BackgroundService
         base.Dispose();
     }
 
-    private readonly record struct Signal(CapturedSession? Session, bool Cleared)
-    {
-        public static Signal For(CapturedSession s) => new(s, false);
-        public static Signal Clear() => new(null, true);
-    }
+    private readonly record struct Signal(CapturedSession? Session, SessionChangeKind Kind);
 }
