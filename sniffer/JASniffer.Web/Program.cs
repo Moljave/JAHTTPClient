@@ -189,7 +189,9 @@ api.MapPost("/compose", async (ComposeRequest body, UpstreamRelay relay, Session
         var headers = ParseHeaderBlock(body.Headers);
         byte[] payload = string.IsNullOrEmpty(body.Body) ? [] : System.Text.Encoding.UTF8.GetBytes(body.Body);
         var id = await relay.ComposeAsync(store, body.Method ?? "GET", body.Url!, headers, payload, ct);
-        return Results.Ok(new { id });
+        // Return the full detail so the Resender can show the response in one round-trip.
+        var session = store.Get(id);
+        return session is null ? Results.Ok(new { id }) : Results.Ok(DtoMapper.ToDetail(session));
     }
     catch (Exception ex)
     {

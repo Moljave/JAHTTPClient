@@ -12,10 +12,16 @@
     detail: null,
     reqTab: "headers",
     resTab: "headers",
-    filter: { text: "", method: "", status: "", type: "" },
+    filter: { text: "", method: "", status: "", type: "", host: "" },
+    hiddenHosts: new Set(),
     methods: new Set(),
     types: new Set(),
     follow: true,
+    // Resender
+    rsDetail: null,        // last response detail shown in the Resender
+    rsResTab: "headers",
+    rsHistory: [],         // [{ id, method, status }]
+    rsRawHeaders: false,
   };
 
   const $ = (s) => document.querySelector(s);
@@ -112,6 +118,8 @@
 
   function matches(s) {
     const f = state.filter;
+    if (f.host && s.host !== f.host) return false;
+    if (state.hiddenHosts.has(s.host)) return false;
     if (f.method && s.method !== f.method) return false;
     if (f.status && Math.floor(s.status / 100) !== +f.status) return false;
     if (f.type && shortType(s.responseContentType) !== f.type) return false;
@@ -179,6 +187,18 @@
 
   function updateCounts() {
     el.counts.textContent = `${state.filtered.length} из ${state.ids.length} сессий`;
+    const chip = $("#filterChip");
+    const parts = [];
+    if (state.filter.host) parts.push("host = " + state.filter.host);
+    if (state.hiddenHosts.size) parts.push("скрыто хостов: " + state.hiddenHosts.size);
+    if (parts.length) { chip.textContent = parts.join(" · ") + "  ✕"; chip.classList.remove("hidden"); }
+    else chip.classList.add("hidden");
+  }
+
+  function clearHostFilters() {
+    state.filter.host = "";
+    state.hiddenHosts.clear();
+    scheduleRender();
   }
 
   // ---- selection + inspectors ---------------------------------------------
@@ -201,17 +221,7 @@
     el.reqBadges.innerHTML =
       `<span class="badge b-blue">${escapeHtml(s.method)}</span>` +
       `<span class="badge b-muted">HTTP/${escapeHtml(s.requestHttpVersion)}</span>`;
-
-    const statusBadge = s.wasTunneled
-      ? `<span class="badge b-muted">TUNNELED</span>`
-      : s.error
-        ? `<span class="badge b-red">ERROR</span>`
-        : `<span class="badge ${badgeColor(s.status)}">${s.status} ${escapeHtml(s.reason || "")}</span>`;
-    el.resBadges.innerHTML = statusBadge +
-      (s.wasTunneled ? "" : `<span class="badge b-muted">${httpLabel(s.responseHttpVersion)}</span>`) +
-      (s.wasTunneled ? "" : `<span class="badge b-muted">BODY: ${formatBytes(s.bodyLength)}</span>`) +
-      (d.tlsSummary ? `<span class="badge b-green" title="Производное от активного пресета; реальная версия TLS апстрима не раскрывается">${escapeHtml(d.tlsSummary)}</span>` : "") +
-      (s.followedRedirects && s.finalUrl && s.finalUrl !== s.url ? `<span class="badge b-blue" title="${escapeHtml(s.finalUrl)}">→ редирект</span>` : "");
+    el.resBadges.innerHTML = responseBadgesHtml(s, d);
 
     setCount(el.reqTabs, "headers", d.requestHeaders.length);
     setCount(el.reqTabs, "params", d.queryParams.length);
@@ -227,6 +237,21 @@
     const g = Math.floor(st / 100);
     return g === 2 ? "b-green" : g === 3 ? "b-blue" : g === 4 ? "b-orange" : g === 5 ? "b-red" : "b-muted";
   };
+
+  // Response badges shared by the main inspector and the Resender.
+  function responseBadgesHtml(s, d) {
+    const statusBadge = s.wasTunneled
+      ? `<span class="badge b-muted">TUNNELED</span>`
+      : s.error
+        ? `<span class="badge b-red">ERROR</span>`
+        : `<span class="badge ${badgeColor(s.status)}">${s.status} ${escapeHtml(s.reason || "")}</span>`;
+    return statusBadge +
+      (s.wasTunneled ? "" : `<span class="badge b-muted">${httpLabel(s.responseHttpVersion)}</span>`) +
+      (s.wasTunneled ? "" : `<span class="badge b-muted">BODY: ${formatBytes(s.bodyLength)}</span>`) +
+      (s.completed && !s.wasTunneled ? `<span class="badge b-muted">${Math.round(s.durationMs)} ms</span>` : "") +
+      (d && d.tlsSummary ? `<span class="badge b-green" title="Производное от активного пресета; реальная версия TLS апстрима не раскрывается">${escapeHtml(d.tlsSummary)}</span>` : "") +
+      (s.followedRedirects && s.finalUrl && s.finalUrl !== s.url ? `<span class="badge b-blue" title="${escapeHtml(s.finalUrl)}">→ редирект</span>` : "");
+  }
 
   function setCount(tabs, name, n) {
     const btn = tabs.querySelector(`[data-tab="${name}"]`);
@@ -252,7 +277,12 @@
 
   function renderResTab(tab) {
     state.resTab = tab;
-    const d = state.detail; if (!d) return;
+    if (state.detail) renderResTabInto(state.detail, el.resBody, el.resTabs, tab);
+  }
+
+  // Renders a response tab for any detail into any container/tabs — reused by the
+  // main inspector and the Resender's response pane.
+  function renderResTabInto(d, bodyEl, tabsEl, tab) {
     let html;
     switch (tab) {
       case "headers": html = kvTable(d.responseHeaders.map((h) => [h.name, h.value]), true); break;
@@ -261,9 +291,9 @@
       case "preview": html = renderPreview(d); break;
       case "body": html = renderBody(d.responseBody, d.summary.id, "response"); break;
     }
-    el.resBody.innerHTML = html;
-    afterRender(el.resBody, d.summary.id, "response");
-    activate(el.resTabs, tab);
+    bodyEl.innerHTML = html;
+    afterRender(bodyEl, d.summary.id, "response");
+    activate(tabsEl, tab);
   }
 
   const activate = (tabs, tab) =>
@@ -437,16 +467,27 @@
 
     $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
     $("#settingsClose").addEventListener("click", () => closeModal("settingsModal"));
-    $("#btnRequester").addEventListener("click", () => { prefillRequester(); openModal("requesterModal"); });
-    $("#cmpClose").addEventListener("click", () => closeModal("requesterModal"));
-    $("#cmpSend").addEventListener("click", sendComposer);
-    ["settingsModal", "requesterModal"].forEach((id) =>
+
+    // Resender
+    $("#btnResender").addEventListener("click", () => openResender(state.detail || null));
+    $("#rsClose").addEventListener("click", () => closeModal("resenderModal"));
+    $("#rsSend").addEventListener("click", sendResender);
+    $("#rsAddHeader").addEventListener("click", addHeaderRow);
+    $("#btnRsRaw").addEventListener("click", toggleRawHeaders);
+    $("#rsHeaders").addEventListener("click", (e) => { if (e.target.classList.contains("hrow-del")) e.target.closest(".hrow").remove(); });
+    $("#rsHistory").addEventListener("change", (e) => loadRsHistory(e.target.value));
+    $("#rsReqTabs").addEventListener("click", (e) => { if (e.target.dataset.tab) switchRsReqTab(e.target.dataset.tab); });
+    $("#rsResTabs").addEventListener("click", (e) => { if (e.target.dataset.tab) renderRsResTab(e.target.dataset.tab); });
+    $("#rsResTabs").querySelectorAll(".tab").forEach((b) => b.dataset.label = b.textContent);
+    rs("rsUrl").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendResender(); } });
+    ["settingsModal", "resenderModal"].forEach((id) =>
       $("#" + id).addEventListener("click", (e) => { if (e.target.id === id) closeModal(id); }));
 
     el.filterText.addEventListener("input", () => { state.filter.text = el.filterText.value.toLowerCase(); scheduleRender(); });
     el.filterMethod.addEventListener("change", () => { state.filter.method = el.filterMethod.value; scheduleRender(); });
     el.filterStatus.addEventListener("change", () => { state.filter.status = el.filterStatus.value; scheduleRender(); });
     el.filterType.addEventListener("change", () => { state.filter.type = el.filterType.value; scheduleRender(); });
+    $("#filterChip").addEventListener("click", clearHostFilters);
 
     // context menu + copy-as-cURL + keyboard
     el.gridRows.addEventListener("contextmenu", (e) => {
@@ -528,31 +569,157 @@
     }
   }
 
-  function prefillRequester() {
-    if (state.detail && !$("#cmpUrl").value.trim()) fillComposer(state.detail);
+  // ---- Resender: edit a request, resend, see the response inline ----------
+  const rs = (id) => $("#" + id);
+
+  function openResender(detail) {
+    fillResender(detail);
+    renderRsResponse(detail || null);
+    openModal("resenderModal");
+    rs("rsUrl").focus();
   }
 
-  async function sendComposer() {
-    const url = $("#cmpUrl").value.trim();
-    const status = $("#cmpStatus");
+  function fillResender(d) {
+    rs("rsMethod").value = d ? (d.summary.method || "GET").toUpperCase() : "GET";
+    rs("rsUrl").value = d ? (d.summary.url || "") : "";
+    setHeaderRows(d ? d.requestHeaders.map((h) => ({ name: h.name, value: h.value, on: true })) : []);
+    rs("rsBody").value = d && d.requestBody && d.requestBody.isText && d.requestBody.text ? d.requestBody.text : "";
+    rs("rsStatus").textContent = "Правьте запрос и нажмите Send — ответ появится справа.";
+    switchRsReqTab("headers");
+  }
+
+  function headerRowHtml(h) {
+    return `<div class="hrow">
+      <input type="checkbox" class="hrow-on" ${h.on === false ? "" : "checked"} title="включить/выключить заголовок"/>
+      <input class="hrow-name" placeholder="Header" value="${escapeHtml(h.name)}"/>
+      <input class="hrow-val" placeholder="value" value="${escapeHtml(h.value)}"/>
+      <button class="hrow-del" type="button" title="удалить">✕</button>
+    </div>`;
+  }
+
+  function setHeaderRows(headers) {
+    if (state.rsRawHeaders) { rs("rsHeadersRaw").value = headers.map((h) => h.name + ": " + h.value).join("\n"); return; }
+    rs("rsHeaders").innerHTML = headers.map(headerRowHtml).join("");
+  }
+
+  function currentHeaderRows() {
+    const out = [];
+    rs("rsHeaders").querySelectorAll(".hrow").forEach((row) => out.push({
+      name: row.querySelector(".hrow-name").value,
+      value: row.querySelector(".hrow-val").value,
+      on: row.querySelector(".hrow-on").checked,
+    }));
+    return out;
+  }
+
+  function addHeaderRow() {
+    const div = document.createElement("div");
+    div.innerHTML = headerRowHtml({ name: "", value: "", on: true });
+    rs("rsHeaders").appendChild(div.firstElementChild);
+    rs("rsHeaders").lastElementChild.querySelector(".hrow-name").focus();
+  }
+
+  function collectHeaderBlock() {
+    if (state.rsRawHeaders) return rs("rsHeadersRaw").value;
+    const lines = [];
+    rs("rsHeaders").querySelectorAll(".hrow").forEach((row) => {
+      if (!row.querySelector(".hrow-on").checked) return;
+      const name = row.querySelector(".hrow-name").value.trim();
+      if (name) lines.push(name + ": " + row.querySelector(".hrow-val").value);
+    });
+    return lines.join("\n");
+  }
+
+  function parseHeaderText(text) {
+    return text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+      const i = l.indexOf(":");
+      return i > 0 ? { name: l.slice(0, i).trim(), value: l.slice(i + 1).trim(), on: true } : null;
+    }).filter(Boolean);
+  }
+
+  function toggleRawHeaders() {
+    const headers = state.rsRawHeaders ? parseHeaderText(rs("rsHeadersRaw").value) : currentHeaderRows();
+    state.rsRawHeaders = !state.rsRawHeaders;
+    rs("rsHeaders").classList.toggle("hidden", state.rsRawHeaders);
+    rs("rsHeadersRaw").classList.toggle("hidden", !state.rsRawHeaders);
+    rs("btnRsRaw").classList.toggle("active", state.rsRawHeaders);
+    setHeaderRows(headers);
+  }
+
+  function switchRsReqTab(tab) {
+    rs("rsHeadersPane").classList.toggle("hidden", tab !== "headers");
+    rs("rsBodyPane").classList.toggle("hidden", tab !== "body");
+    activate(rs("rsReqTabs"), tab);
+  }
+
+  async function sendResender() {
+    const url = rs("rsUrl").value.trim();
+    const status = rs("rsStatus");
     if (!url) { status.textContent = "Укажите URL."; return; }
     status.textContent = "Отправка…";
+    rs("rsSend").disabled = true;
     try {
       const resp = await fetch("/api/compose", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ method: $("#cmpMethod").value, url, headers: $("#cmpHeaders").value, body: $("#cmpBody").value }),
+        body: JSON.stringify({ method: rs("rsMethod").value, url, headers: collectHeaderBlock(), body: rs("rsBody").value }),
       });
       const data = await resp.json().catch(() => ({}));
-      if (resp.ok && data.id) {
-        status.textContent = "Отправлено — сессия #" + data.id;
-        closeModal("requesterModal");
-        selectSession(data.id);
+      if (resp.ok && data.summary) {
+        const s = data.summary;
+        status.textContent = `Отправлено — #${s.id} · ${s.error ? "ERR" : s.status} · ${Math.round(s.durationMs)} ms`;
+        pushRsHistory(s);
+        renderRsResponse(data);
       } else {
         status.textContent = data.error || ("Ошибка HTTP " + resp.status);
       }
     } catch {
       status.textContent = "Запрос не удался.";
+    } finally {
+      rs("rsSend").disabled = false;
     }
+  }
+
+  function pushRsHistory(s) {
+    state.rsHistory = state.rsHistory.filter((h) => h.id !== s.id);
+    state.rsHistory.unshift({ id: s.id, method: s.method, status: s.status });
+    if (state.rsHistory.length > 30) state.rsHistory.pop();
+    rs("rsHistory").innerHTML = `<option value="">История (${state.rsHistory.length})</option>` +
+      state.rsHistory.map((h) => `<option value="${h.id}">#${h.id} ${escapeHtml(h.method)} ${h.status || ""}</option>`).join("");
+  }
+
+  function renderRsResponse(detail) {
+    state.rsDetail = detail;
+    const badges = rs("rsResBadges");
+    if (!detail) { badges.innerHTML = `<span class="muted">Ответ появится здесь после Send.</span>`; rs("rsResBody").innerHTML = ""; return; }
+    badges.innerHTML = responseBadgesHtml(detail.summary, detail);
+    setCount(rs("rsResTabs"), "headers", detail.responseHeaders.length);
+    setCount(rs("rsResTabs"), "cookies", detail.responseCookies.length);
+    renderResTabInto(detail, rs("rsResBody"), rs("rsResTabs"), state.rsResTab);
+  }
+
+  function renderRsResTab(tab) {
+    state.rsResTab = tab;
+    if (state.rsDetail) renderResTabInto(state.rsDetail, rs("rsResBody"), rs("rsResTabs"), tab);
+  }
+
+  async function loadRsHistory(id) {
+    if (!id) return;
+    try { const d = await getJson("/api/sessions/" + id); fillResender(d); renderRsResponse(d); }
+    catch { flash("Сессия больше недоступна"); }
+  }
+
+  // Resend a captured request unchanged (new session), without opening the editor.
+  async function resendAsIs(d) {
+    try {
+      const headers = d.requestHeaders.map((h) => h.name + ": " + h.value).join("\n");
+      const body = d.requestBody && d.requestBody.isText && d.requestBody.text ? d.requestBody.text : "";
+      const resp = await fetch("/api/compose", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ method: d.summary.method, url: d.summary.url, headers, body }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      flash(resp.ok && data.summary ? `Отправлено #${data.summary.id} · ${data.summary.status}` : (data.error || "Ошибка"));
+    } catch { flash("Запрос не удался"); }
   }
 
   function initDividers() {
@@ -599,23 +766,29 @@
     removeLocal(id);
   }
 
-  function fillComposer(d) {
-    $("#cmpMethod").value = (d.summary.method || "GET").toUpperCase();
-    $("#cmpUrl").value = d.summary.url || "";
-    $("#cmpHeaders").value = d.requestHeaders.map((h) => h.name + ": " + h.value).join("\n");
-    $("#cmpBody").value = d.requestBody && d.requestBody.isText && d.requestBody.text ? d.requestBody.text : "";
-    $("#cmpStatus").textContent = "";
-  }
-
   function hideContextMenu() { $("#ctxMenu").classList.add("hidden"); }
+
+  const ctxItem = (act, label) => `<div class="ctx-item" data-act="${act}">${label}</div>`;
+  const ctxSep = `<div class="ctx-sep"></div>`;
 
   function showContextMenu(x, y, id) {
     const m = $("#ctxMenu");
     m.innerHTML =
-      `<div class="ctx-item" data-act="copyurl">Копировать URL</div>` +
-      `<div class="ctx-item" data-act="copycurl">Копировать как cURL</div>` +
-      `<div class="ctx-item" data-act="replay">Повторить в Requester</div>` +
-      `<div class="ctx-sep"></div>` +
+      ctxItem("resender", "Открыть в Resender") +
+      ctxItem("resend", "Повторить как есть") +
+      ctxSep +
+      ctxItem("copyurl", "Копировать URL") +
+      ctxItem("copycurl", "Копировать как cURL") +
+      ctxItem("copyresp", "Копировать тело ответа") +
+      ctxItem("copyreq", "Копировать тело запроса") +
+      ctxItem("copyrhdr", "Копировать заголовки ответа") +
+      ctxSep +
+      ctxItem("open", "Открыть URL в браузере") +
+      ctxItem("save", "Сохранить тело ответа") +
+      ctxSep +
+      ctxItem("hostonly", "Только этот хост") +
+      ctxItem("hosthide", "Скрыть этот хост") +
+      ctxSep +
       `<div class="ctx-item danger" data-act="remove">Удалить сессию</div>`;
     m.dataset.id = id;
     m.classList.remove("hidden");
@@ -624,16 +797,37 @@
   }
 
   async function ctxAction(act, id) {
-    if (act === "remove") { removeSession(id); return; }
-    if (act === "copyurl") {
-      const s = state.sessions.get(id);
-      if (s && await copyText(s.url)) flash("URL скопирован");
-      return;
+    const s = state.sessions.get(id);
+    // actions that work from the summary alone (no detail fetch)
+    switch (act) {
+      case "remove": removeSession(id); return;
+      case "copyurl": if (s && await copyText(s.url)) flash("URL скопирован"); return;
+      case "open": if (s) window.open(s.url, "_blank"); return;
+      case "save": window.open(`/api/sessions/${id}/response-body?download=1`, "_blank"); return;
+      case "hostonly": if (s) { state.filter.host = s.host; scheduleRender(); } return;
+      case "hosthide": if (s) { state.hiddenHosts.add(s.host); scheduleRender(); } return;
     }
+    // actions needing the full detail
     let d;
     try { d = await getJson(`/api/sessions/${id}`); } catch { return; }
-    if (act === "copycurl") { if (await copyText(buildCurl(d))) flash("cURL скопирован"); }
-    else if (act === "replay") { fillComposer(d); openModal("requesterModal"); }
+    switch (act) {
+      case "resender": openResender(d); break;
+      case "resend": resendAsIs(d); break;
+      case "copycurl": if (await copyText(buildCurl(d))) flash("cURL скопирован"); break;
+      case "copyresp":
+        if (d.responseBody && d.responseBody.isText && d.responseBody.text != null) {
+          if (await copyText(d.responseBody.text)) flash("Тело ответа скопировано");
+        } else flash("Тело не текстовое — используйте «Сохранить»");
+        break;
+      case "copyreq":
+        if (d.requestBody && d.requestBody.isText && d.requestBody.text != null) {
+          if (await copyText(d.requestBody.text)) flash("Тело запроса скопировано");
+        } else flash("Нет текстового тела запроса");
+        break;
+      case "copyrhdr":
+        if (await copyText(d.responseHeaders.map((h) => h.name + ": " + h.value).join("\n"))) flash("Заголовки ответа скопированы");
+        break;
+    }
   }
 
   function moveSelection(delta) {
@@ -674,10 +868,10 @@
   }
 
   const anyModalOpen = () =>
-    !$("#settingsModal").classList.contains("hidden") || !$("#requesterModal").classList.contains("hidden");
+    !$("#settingsModal").classList.contains("hidden") || !$("#resenderModal").classList.contains("hidden");
 
   function onKeyDown(e) {
-    if (e.key === "Escape") { closeModal("settingsModal"); closeModal("requesterModal"); hideContextMenu(); return; }
+    if (e.key === "Escape") { closeModal("settingsModal"); closeModal("resenderModal"); hideContextMenu(); return; }
     const tag = document.activeElement && document.activeElement.tagName;
     const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
     if (!inField && !anyModalOpen() && (e.key === "/" || (e.ctrlKey && (e.key === "f" || e.key === "F")))) {

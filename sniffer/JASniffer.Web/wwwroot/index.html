@@ -17,7 +17,7 @@
     </div>
 
     <div class="toolbar-actions">
-      <button id="btnRequester" class="btn" title="Собрать и отправить запрос через движок с отпечатком Chrome">⤴ Requester</button>
+      <button id="btnResender" class="btn" title="Редактировать запрос и отправить через движок с отпечатком Chrome, видя ответ рядом">⤴ Resender</button>
       <button id="btnClear" class="btn" title="Очистить список сессий">Clear</button>
       <button id="btnExport" class="btn" title="Экспорт сессий в архив Fiddler .saz">Export .saz</button>
       <button id="btnSettings" class="btn" title="Настройки">⚙ Settings</button>
@@ -26,7 +26,7 @@
   </header>
 
   <div class="filterbar">
-    <input type="search" id="filterText" class="filter-input" placeholder="Filter by URL, host, method, status, or body text…" />
+    <input type="search" id="filterText" class="filter-input" placeholder="Фильтр по URL, host, методу, статусу или телу…" />
     <select id="filterMethod" class="filter-select"><option value="">Method</option></select>
     <select id="filterStatus" class="filter-select">
       <option value="">Status</option>
@@ -34,6 +34,7 @@
       <option value="4">4xx</option><option value="5">5xx</option>
     </select>
     <select id="filterType" class="filter-select"><option value="">Content-Type</option></select>
+    <span id="filterChip" class="filter-chip hidden" title="Сбросить фильтр по хосту"></span>
     <span id="counts" class="counts"></span>
   </div>
 
@@ -169,24 +170,62 @@
     </div>
   </div>
 
-  <!-- Requester / composer -->
-  <div id="requesterModal" class="modal hidden">
-    <div class="modal-card wide">
-      <div class="modal-head"><h3>Requester</h3><button class="x" id="cmpClose" title="Закрыть">✕</button></div>
-      <div class="modal-body">
-        <div class="cmp-line">
-          <select id="cmpMethod" class="filter-select">
-            <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
-            <option>PATCH</option><option>HEAD</option><option>OPTIONS</option>
-          </select>
-          <input id="cmpUrl" class="filter-input" placeholder="https://example.com/path" />
-          <button class="btn primary" id="cmpSend">Send</button>
-        </div>
-        <div class="setting-label">Заголовки (Name: Value, по строке)</div>
-        <textarea id="cmpHeaders" class="cmp-area" rows="6" spellcheck="false" placeholder="Accept: application/json"></textarea>
-        <div class="setting-label">Тело</div>
-        <textarea id="cmpBody" class="cmp-area" rows="6" spellcheck="false" placeholder="{ }"></textarea>
-        <div class="setting-note" id="cmpStatus">Запрос уйдёт наверх с текущим отпечатком и появится в списке как обычная сессия.</div>
+  <!-- Resender: edit a request, resend, see the response inline -->
+  <div id="resenderModal" class="modal hidden">
+    <div class="modal-card xl">
+      <div class="modal-head">
+        <h3>Resender</h3>
+        <select id="rsHistory" class="filter-select rs-history"><option value="">История (0)</option></select>
+        <button class="x" id="rsClose" title="Закрыть">✕</button>
+      </div>
+      <div class="resender-body">
+
+        <!-- left: request editor -->
+        <section class="resender-req">
+          <div class="cmp-line">
+            <select id="rsMethod" class="filter-select">
+              <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
+              <option>PATCH</option><option>HEAD</option><option>OPTIONS</option>
+            </select>
+            <input id="rsUrl" class="filter-input" placeholder="https://example.com/path" />
+            <button class="btn primary" id="rsSend">Send</button>
+          </div>
+          <nav class="tabs" id="rsReqTabs">
+            <button class="tab active" data-tab="headers" type="button">Headers</button>
+            <button class="tab" data-tab="body" type="button">Body</button>
+            <button class="mini-btn rs-raw" id="btnRsRaw" type="button" title="Переключить таблицу/текст">Raw</button>
+            <button class="mini-btn" id="rsAddHeader" type="button" title="Добавить заголовок">+ Заголовок</button>
+          </nav>
+          <div class="resender-editor">
+            <div id="rsHeadersPane">
+              <div id="rsHeaders" class="hrows"></div>
+              <textarea id="rsHeadersRaw" class="cmp-area hidden" rows="12" spellcheck="false" placeholder="Accept: application/json"></textarea>
+            </div>
+            <div id="rsBodyPane" class="hidden">
+              <textarea id="rsBody" class="cmp-area" rows="14" spellcheck="false" placeholder="тело запроса"></textarea>
+            </div>
+          </div>
+          <div class="setting-note" id="rsStatus">Правьте запрос и нажмите Send — ответ появится справа.</div>
+        </section>
+
+        <div class="resender-vdiv"></div>
+
+        <!-- right: response viewer -->
+        <section class="resender-res">
+          <div class="inspect-head">
+            <span class="inspect-title">Response</span>
+            <span id="rsResBadges" class="badges"><span class="muted">Ответ появится здесь после Send.</span></span>
+          </div>
+          <nav class="tabs" id="rsResTabs">
+            <button class="tab active" data-tab="headers" type="button">Headers</button>
+            <button class="tab" data-tab="cookies" type="button">Cookies</button>
+            <button class="tab" data-tab="body" type="button">Body</button>
+            <button class="tab" data-tab="preview" type="button">Preview</button>
+            <button class="tab" data-tab="raw" type="button">Raw</button>
+          </nav>
+          <div class="tab-body" id="rsResBody"></div>
+        </section>
+
       </div>
     </div>
   </div>
