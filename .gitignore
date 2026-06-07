@@ -27,3 +27,9 @@ native/go.sum
 .vs/
 .idea/
 *.swp
+
+# local test artifacts
+/ca.cer
+/ca.pem
+/*.saz
+/Project.zip
