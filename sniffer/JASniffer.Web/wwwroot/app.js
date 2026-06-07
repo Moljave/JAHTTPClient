@@ -201,6 +201,16 @@
     scheduleRender();
   }
 
+  // Adds a host to the "don't decrypt" (bypass) list and persists it — the standard
+  // workaround for Cloudflare/JS-challenge sites that break under MITM.
+  async function addBypassHost(host) {
+    const list = $("#txtBypass").value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    if (!list.includes(host)) list.push(host);
+    $("#txtBypass").value = list.join("\n");
+    await saveSettings();
+    flash("Без расшифровки: " + host + " — перезагрузите страницу");
+  }
+
   // ---- selection + inspectors ---------------------------------------------
   async function selectSession(id) {
     state.selectedId = id;
@@ -245,10 +255,12 @@
       : s.error
         ? `<span class="badge b-red">ERROR</span>`
         : `<span class="badge ${badgeColor(s.status)}">${s.status} ${escapeHtml(s.reason || "")}</span>`;
+    const cf = d && d.responseHeaders && d.responseHeaders.some((h) => h.name.toLowerCase() === "cf-mitigated");
     return statusBadge +
       (s.wasTunneled ? "" : `<span class="badge b-muted">${httpLabel(s.responseHttpVersion)}</span>`) +
       (s.wasTunneled ? "" : `<span class="badge b-muted">BODY: ${formatBytes(s.bodyLength)}</span>`) +
       (s.completed && !s.wasTunneled ? `<span class="badge b-muted">${Math.round(s.durationMs)} ms</span>` : "") +
+      (cf ? `<span class="badge b-orange" title="Cloudflare-челлендж. MITM-сниф такие сайты обычно не проходит (страница отдаётся браузеру по HTTP/1.1 + ре-фингерпринт). Добавьте хост в «Пропускать без расшифровки»: ПКМ по сессии → «Не расшифровывать этот хост».">CF challenge</span>` : "") +
       (d && d.tlsSummary ? `<span class="badge b-green" title="Производное от активного пресета; реальная версия TLS апстрима не раскрывается">${escapeHtml(d.tlsSummary)}</span>` : "") +
       (s.followedRedirects && s.finalUrl && s.finalUrl !== s.url ? `<span class="badge b-blue" title="${escapeHtml(s.finalUrl)}">→ редирект</span>` : "");
   }
@@ -806,6 +818,7 @@
       ctxSep +
       ctxItem("hostonly", "Только этот хост") +
       ctxItem("hosthide", "Скрыть этот хост") +
+      ctxItem("bypasshost", "Не расшифровывать этот хост (bypass)") +
       ctxSep +
       `<div class="ctx-item danger" data-act="remove">Удалить сессию</div>`;
     m.dataset.id = id;
@@ -824,6 +837,7 @@
       case "save": window.open(`/api/sessions/${id}/response-body?download=1`, "_blank"); return;
       case "hostonly": if (s) { state.filter.host = s.host; scheduleRender(); } return;
       case "hosthide": if (s) { state.hiddenHosts.add(s.host); scheduleRender(); } return;
+      case "bypasshost": if (s) await addBypassHost(s.host); return;
     }
     // actions needing the full detail
     let d;
