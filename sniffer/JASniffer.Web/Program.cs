@@ -76,16 +76,21 @@ api.MapPost("/settings", (SettingsDto dto, SnifferSettings s, UpstreamRelay rela
     s.SmartRedirects = dto.SmartRedirects;
     s.MaxRedirects = dto.MaxRedirects;
     s.Capture = dto.Capture;
-    s.UpstreamProxy = dto.UpstreamProxy;
+    s.UpstreamProxy = dto.UpstreamProxy; // setter canonicalizes any input shape
+    s.RotatingProxy = dto.RotatingProxy;
     s.FingerprintPreset = dto.FingerprintPreset;
     s.ForceHttp1 = dto.ForceHttp1;
     s.InterceptAllPorts = dto.InterceptAllPorts;
     s.IgnoreUpstreamCertErrors = dto.IgnoreUpstreamCertErrors;
     s.BypassHosts = dto.BypassHosts ?? string.Empty;
     relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1, s.IgnoreUpstreamCertErrors); // rebuilds clients only if these changed
+    relay.ApplyProxy(s.UpstreamProxy, s.RotatingProxy); // hot-swap the egress proxy
     SettingsFile.Save(s, settingsPath);
     return Settings(s);
 });
+
+api.MapPost("/test-proxy", async (TestProxyRequest body, UpstreamRelay relay, CancellationToken ct) =>
+    Results.Ok(await relay.TestProxyAsync(body.Proxy, ct)));
 
 api.MapGet("/sessions", (SessionStore store) =>
     store.Snapshot().Select(DtoMapper.ToSummary).ToArray());
@@ -238,7 +243,7 @@ static IResult ServeBody(byte[] body, string? contentType, string name, bool dow
 }
 
 static SettingsDto Settings(SnifferSettings s) =>
-    new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.FingerprintPreset, s.ForceHttp1,
+    new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.RotatingProxy, s.FingerprintPreset, s.ForceHttp1,
         s.InterceptAllPorts, s.IgnoreUpstreamCertErrors, s.BypassHosts);
 
 // Parses a "Name: Value" per-line header block (as typed in the Requester) into
@@ -267,6 +272,8 @@ static List<HeaderEntry> ParseHeaderBlock(string? block)
 }
 
 internal sealed record SystemProxyRequest(bool Enabled);
+
+internal sealed record TestProxyRequest(string? Proxy);
 
 internal sealed record UdpToggle(bool Enabled);
 

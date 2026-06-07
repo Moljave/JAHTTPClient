@@ -59,6 +59,7 @@ public sealed record SettingsDto(
     int MaxRedirects,
     bool Capture,
     string? UpstreamProxy,
+    bool RotatingProxy,
     string FingerprintPreset,
     bool ForceHttp1,
     bool InterceptAllPorts,

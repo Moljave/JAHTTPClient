@@ -33,6 +33,7 @@ public static class SettingsFile
             settings.MaxRedirects = saved.MaxRedirects <= 0 ? 10 : saved.MaxRedirects;
             settings.Capture = saved.Capture;
             settings.UpstreamProxy = saved.UpstreamProxy;
+            settings.RotatingProxy = saved.RotatingProxy;
             settings.FingerprintPreset = string.IsNullOrWhiteSpace(saved.FingerprintPreset) ? "Chrome" : saved.FingerprintPreset;
             settings.ForceHttp1 = saved.ForceHttp1;
             settings.InterceptAllPorts = saved.InterceptAllPorts;
@@ -54,7 +55,8 @@ public static class SettingsFile
             var dto = new Persisted(
                 settings.SmartRedirects, settings.MaxRedirects, settings.Capture,
                 settings.UpstreamProxy, settings.FingerprintPreset, settings.ForceHttp1,
-                settings.InterceptAllPorts, settings.IgnoreUpstreamCertErrors, settings.BypassHosts);
+                settings.InterceptAllPorts, settings.IgnoreUpstreamCertErrors, settings.BypassHosts,
+                settings.RotatingProxy);
             File.WriteAllText(path, JsonSerializer.Serialize(dto, Options));
         }
         catch (Exception)
@@ -65,5 +67,5 @@ public static class SettingsFile
 
     private sealed record Persisted(
         bool SmartRedirects, int MaxRedirects, bool Capture, string? UpstreamProxy, string FingerprintPreset, bool ForceHttp1,
-        bool InterceptAllPorts = true, bool IgnoreUpstreamCertErrors = false, string? BypassHosts = null);
+        bool InterceptAllPorts = true, bool IgnoreUpstreamCertErrors = false, string? BypassHosts = null, bool RotatingProxy = false);
 }

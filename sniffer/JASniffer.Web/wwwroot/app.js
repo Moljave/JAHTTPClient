@@ -464,6 +464,9 @@
     $("#tglInterceptAll").addEventListener("change", saveSettings);
     $("#tglInsecure").addEventListener("change", saveSettings);
     $("#txtBypass").addEventListener("change", saveSettings);
+    $("#txtProxy").addEventListener("change", saveSettings);
+    $("#tglRotating").addEventListener("change", saveSettings);
+    $("#btnTestProxy").addEventListener("click", testProxy);
     $("#btnSelftest").addEventListener("click", runSelfTest);
 
     $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
@@ -519,16 +522,29 @@
       smartRedirects: $("#tglRedirects").checked,
       maxRedirects: 10,
       capture: $("#tglCapture").checked,
-      upstreamProxy: null,
+      upstreamProxy: $("#txtProxy").value,
+      rotatingProxy: $("#tglRotating").checked,
       fingerprintPreset: $("#selPreset").value,
       forceHttp1: $("#tglForceHttp1").checked,
       interceptAllPorts: $("#tglInterceptAll").checked,
       ignoreUpstreamCertErrors: $("#tglInsecure").checked,
       bypassHosts: $("#txtBypass").value,
     };
-    await postJson("/api/settings", dto);
+    const res = await postJson("/api/settings", dto);
+    if (res) $("#txtProxy").value = res.upstreamProxy || ""; // show the canonicalized proxy
     const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
     $("#presetLabel").textContent = label;
+  }
+
+  async function testProxy() {
+    const out = $("#proxyTestOut");
+    out.textContent = "Проверка прокси…";
+    try {
+      const r = await postJson("/api/test-proxy", { proxy: $("#txtProxy").value });
+      out.innerHTML = r.ok
+        ? `✅ Прокси работает · внешний IP: <b>${escapeHtml(r.ip || "?")}</b>` + (r.proxy ? `<br><span class="muted">${escapeHtml(r.proxy)}</span>` : "")
+        : `⚠ ${escapeHtml(r.error || "не удалось")}`;
+    } catch { out.textContent = "Не удалось выполнить тест."; }
   }
 
   async function runSelfTest() {
@@ -947,6 +963,8 @@
       $("#tglInterceptAll").checked = s.interceptAllPorts;
       $("#tglInsecure").checked = s.ignoreUpstreamCertErrors;
       $("#txtBypass").value = s.bypassHosts || "";
+      $("#txtProxy").value = s.upstreamProxy || "";
+      $("#tglRotating").checked = s.rotatingProxy;
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
       const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
       if (label) $("#presetLabel").textContent = label;

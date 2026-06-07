@@ -26,6 +26,8 @@ namespace JASniffer.Proxy;
 /// (the jar carries Set-Cookie across hops) and only the final response returns.</item>
 /// </list>
 /// </remarks>
+public sealed record ProxyTestResult(bool Ok, string? Ip = null, string? Proxy = null, string? Error = null);
+
 public sealed class UpstreamRelay : IDisposable
 {
     // Content headers must live on HttpContent, not the request; Content-Length is
@@ -44,6 +46,8 @@ public sealed class UpstreamRelay : IDisposable
     private Ja3Preset _preset;
     private bool _forceHttp1;
     private bool _insecure;
+    private string? _proxyUrl;
+    private bool _proxyRotating;
 
     /// <summary>Display label for the active fingerprint preset, e.g. <c>Chrome 148</c>.</summary>
     public string CurrentPresetLabel { get; private set; }
@@ -54,8 +58,11 @@ public sealed class UpstreamRelay : IDisposable
         _preset = ParsePreset(settings.FingerprintPreset);
         _forceHttp1 = settings.ForceHttp1;
         _insecure = settings.IgnoreUpstreamCertErrors;
+        _proxyUrl = settings.UpstreamProxy;
+        _proxyRotating = settings.RotatingProxy;
         CurrentPresetLabel = LabelFor(_preset);
         (_faithful, _follow) = BuildClients(_preset, _forceHttp1, _insecure, settings.MaxRedirects);
+        ApplyProxyToClients();
     }
 
     /// <summary>
@@ -84,6 +91,7 @@ public sealed class UpstreamRelay : IDisposable
             _forceHttp1 = forceHttp1;
             _insecure = insecure;
             CurrentPresetLabel = LabelFor(preset);
+            ApplyProxyToClients(); // the fresh clients start direct — restore the egress proxy
 
             _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
             {
@@ -202,7 +210,6 @@ public sealed class UpstreamRelay : IDisposable
         var follow = _settings.SmartRedirects;
         var client = follow ? _follow : _faithful;
 
-        ApplyUpstreamProxy(client);
         if (follow)
         {
             client.MaxAutomaticRedirections = _settings.MaxRedirects;
@@ -300,12 +307,66 @@ public sealed class UpstreamRelay : IDisposable
         return message;
     }
 
-    private void ApplyUpstreamProxy(TlsClientChromeHttpClient client)
+    /// <summary>
+    /// Hot-swaps the upstream egress proxy on both clients (cookies/connection pool
+    /// preserved). Call when the proxy setting changes. <paramref name="url"/> must
+    /// already be canonical (<see cref="ProxyUrl.Normalize"/>) or null for direct.
+    /// </summary>
+    public void ApplyProxy(string? url, bool rotating)
     {
-        var desired = _settings.UpstreamProxy;
-        if (!string.Equals(client.Proxy, desired, StringComparison.Ordinal))
+        lock (_swap)
         {
-            client.SetProxy(desired);
+            _proxyUrl = url;
+            _proxyRotating = rotating;
+            ApplyProxyToClients();
+        }
+    }
+
+    private void ApplyProxyToClients()
+    {
+        try
+        {
+            _faithful.SetProxy(_proxyUrl, _proxyRotating);
+            _follow.SetProxy(_proxyUrl, _proxyRotating);
+        }
+        catch (ArgumentException)
+        {
+            // Defensive: a malformed value never breaks the relay (go direct).
+        }
+    }
+
+    /// <summary>
+    /// Sends a probe through <paramref name="proxyInput"/> and reports the egress IP,
+    /// so the UI can confirm a pasted proxy actually works.
+    /// </summary>
+    public async Task<ProxyTestResult> TestProxyAsync(string? proxyInput, CancellationToken ct)
+    {
+        var url = ProxyUrl.Normalize(proxyInput);
+        if (!string.IsNullOrWhiteSpace(proxyInput) && url is null)
+        {
+            return new ProxyTestResult(false, Error: "Не удалось разобрать строку прокси.");
+        }
+
+        using var probe = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
+        {
+            EnableJa3Fingerprinting = true,
+            FingerprintPreset = _preset,
+            Proxy = url,
+            RotatingProxy = _proxyRotating,
+            InsecureSkipVerify = _insecure,
+            Timeout = TimeSpan.FromSeconds(20),
+            MaxRetries = 0,
+        });
+
+        try
+        {
+            using var r = await probe.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.ipify.org/?format=text"), ct).ConfigureAwait(false);
+            var ip = (await r.Content.ReadAsStringAsync(ct).ConfigureAwait(false)).Trim();
+            return new ProxyTestResult((int)r.StatusCode == 200, ip, url);
+        }
+        catch (Exception ex)
+        {
+            return new ProxyTestResult(false, Proxy: url, Error: ex.Message);
         }
     }
 

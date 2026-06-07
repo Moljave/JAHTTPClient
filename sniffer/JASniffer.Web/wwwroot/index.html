@@ -159,6 +159,16 @@
         </div>
 
         <div class="setting">
+          <div class="setting-label">Апстрим‑прокси (исходящий)</div>
+          <div class="cmp-line">
+            <input id="txtProxy" class="filter-input" placeholder="http://login:pass@ip:port · socks5://ip:port · ip:port:login:pass" />
+            <button class="btn" id="btnTestProxy" type="button" title="Проверить прокси — покажет внешний IP">Тест</button>
+          </div>
+          <label class="toggle" title="Прокси меняет exit‑IP на каждый запрос (отключает пул соединений против EOF)"><input type="checkbox" id="tglRotating" /> <span>Ротационный прокси</span></label>
+          <div class="setting-note" id="proxyTestOut">Весь исходящий (апстрим) трафик идёт через прокси; расшифрованные сессии вы по‑прежнему видите. Форматы: <code>http://user:pass@ip:port</code>, <code>socks5://ip:port</code>, <code>ip:port</code>, <code>ip:port:user:pass</code>.</div>
+        </div>
+
+        <div class="setting">
           <div class="setting-label">Пропускать без расшифровки (хосты)</div>
           <textarea id="txtBypass" class="cmp-area" rows="3" spellcheck="false" placeholder="cdn.ls.app&#10;example.com"></textarea>
           <div class="setting-note">По строке/через запятую. Эти хосты идут сырым туннелем (без MITM) — для сайтов с pinning или тех, что ломаются при перехвате. Хост охватывает и поддомены (<code>ls.app</code> → <code>cdn.ls.app</code>). В списке видны как «tunnel».</div>

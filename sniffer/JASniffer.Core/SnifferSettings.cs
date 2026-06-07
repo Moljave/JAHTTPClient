@@ -15,6 +15,7 @@ public sealed class SnifferSettings
     private volatile bool _forceHttp1;
     private volatile bool _interceptAllPorts = true;
     private volatile bool _ignoreUpstreamCertErrors;
+    private volatile bool _rotatingProxy;
     private volatile string[] _bypassHosts = [];
 
     /// <summary>
@@ -44,11 +45,21 @@ public sealed class SnifferSettings
         set => _capture = value;
     }
 
-    /// <summary>Optional upstream egress proxy applied to the JAHTTPClient leg (null = direct).</summary>
+    /// <summary>
+    /// Optional upstream egress proxy applied to the JAHTTPClient leg (null = direct).
+    /// Set from any common shape (see <see cref="ProxyUrl"/>); stored canonicalized.
+    /// </summary>
     public string? UpstreamProxy
     {
         get => _upstreamProxy;
-        set => _upstreamProxy = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        set => _upstreamProxy = ProxyUrl.Normalize(value);
+    }
+
+    /// <summary>Hint that the upstream proxy rotates its exit IP per request (disables pooled keep-alive to avoid EOF).</summary>
+    public bool RotatingProxy
+    {
+        get => _rotatingProxy;
+        set => _rotatingProxy = value;
     }
 
     /// <summary>
