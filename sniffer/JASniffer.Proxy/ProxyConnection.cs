@@ -107,9 +107,10 @@ internal sealed class ProxyConnection(
         await stream.WriteAsync(Encoding.Latin1.GetBytes("HTTP/1.1 200 Connection Established\r\n\r\n"), ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
 
-        if (!MitmPorts.Contains(port) && !settings.InterceptAllPorts)
+        if (settings.IsBypassed(host) || (!MitmPorts.Contains(port) && !settings.InterceptAllPorts))
         {
-            // Non-HTTP port (or opaque) and all-port interception is off: raw tunnel.
+            // Pass-through (bypass list, or a non-HTTP port with all-port interception off):
+            // raw tunnel, no inspection — but still recorded so the host stays visible.
             await TunnelRawAsync(stream, reader, host, port, "CONNECT", ct).ConfigureAwait(false);
             return;
         }
@@ -128,7 +129,10 @@ internal sealed class ProxyConnection(
         }
         catch (Exception ex)
         {
+            // The browser aborted the TLS handshake (often because it raced to HTTP/3,
+            // or pins this host). Record it so the host is visible, then drop the conn.
             logger.LogDebug(ex, "TLS handshake with the browser failed for {Host}", host);
+            RecordConnectFailure(host, port, ex.InnerException?.Message ?? ex.Message);
             return;
         }
 
@@ -141,36 +145,44 @@ internal sealed class ProxyConnection(
     private async Task PumpMitmAsync(SslStream tls, string host, int port, CancellationToken ct)
     {
         var reader = new Http1Reader(tls);
-        while (true)
+        try
         {
-            var head = await reader.ReadHeaderBlockAsync(ct).ConfigureAwait(false);
-            if (head is null)
+            while (true)
             {
-                return;
-            }
+                var head = await reader.ReadHeaderBlockAsync(ct).ConfigureAwait(false);
+                if (head is null)
+                {
+                    return;
+                }
 
-            var request = Http1Request.Parse(head, secure: true, tunnelHost: host, tunnelPort: port);
-            if (request is null)
-            {
-                await WireResponse.WriteStatusAsync(tls, 400, "Bad Request", "Malformed request line.", ct).ConfigureAwait(false);
-                return;
-            }
+                var request = Http1Request.Parse(head, secure: true, tunnelHost: host, tunnelPort: port);
+                if (request is null)
+                {
+                    await WireResponse.WriteStatusAsync(tls, 400, "Bad Request", "Malformed request line.", ct).ConfigureAwait(false);
+                    return;
+                }
 
-            if (request.IsUpgrade || request.IsEventStream)
-            {
-                // WebSocket/SSE inside TLS: re-establish TLS to the origin and pass
-                // the (already-decrypted) stream straight through, uninspected.
-                await TunnelTlsAsync(tls, reader, request, host, port, ct).ConfigureAwait(false);
-                return;
-            }
+                if (request.IsUpgrade || request.IsEventStream)
+                {
+                    // WebSocket/SSE inside TLS: re-establish TLS to the origin and pass
+                    // the (already-decrypted) stream straight through, uninspected.
+                    await TunnelTlsAsync(tls, reader, request, host, port, ct).ConfigureAwait(false);
+                    return;
+                }
 
-            request.Body = await Http1Request.ReadBodyAsync(request, reader, ct).ConfigureAwait(false);
-            await ExchangeAsync(tls, request, ct).ConfigureAwait(false);
+                request.Body = await Http1Request.ReadBodyAsync(request, reader, ct).ConfigureAwait(false);
+                await ExchangeAsync(tls, request, ct).ConfigureAwait(false);
 
-            if (request.WantsClose)
-            {
-                return;
+                if (request.WantsClose)
+                {
+                    return;
+                }
             }
+        }
+        catch (Exception ex) when (ex is IOException or SocketException)
+        {
+            // The browser reset/closed the tunnel mid-stream — a normal end of
+            // connection for a proxy; handled here so it doesn't surface as unhandled.
         }
     }
 
@@ -371,6 +383,22 @@ internal sealed class ProxyConnection(
         FingerprintPreset = "—",
         ResponseHttpVersion = string.Empty,
     };
+
+    // Records a CONNECT whose TLS interception failed, so a problematic host (pinned,
+    // or one the browser dropped to use HTTP/3) is still visible in the list.
+    private void RecordConnectFailure(string host, int port, string reason)
+    {
+        if (IsSelfUi(host, port))
+        {
+            return;
+        }
+
+        var session = NewTunnelSession("CONNECT", host, port, "tunnel", $"{host}:{port}");
+        session.Error = reason;
+        session.Completed = true;
+        store.Add(session);
+        store.Update(session);
+    }
 
     private byte[] CapBody(byte[] body, out bool truncated)
     {

@@ -62,7 +62,8 @@ public sealed record SettingsDto(
     string FingerprintPreset,
     bool ForceHttp1,
     bool InterceptAllPorts,
-    bool IgnoreUpstreamCertErrors);
+    bool IgnoreUpstreamCertErrors,
+    string? BypassHosts);
 
 /// <summary>One-shot status the UI shows in the header / CA panel.</summary>
 public sealed record StatusDto(

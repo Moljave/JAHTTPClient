@@ -15,6 +15,7 @@ public sealed class SnifferSettings
     private volatile bool _forceHttp1;
     private volatile bool _interceptAllPorts = true;
     private volatile bool _ignoreUpstreamCertErrors;
+    private volatile string[] _bypassHosts = [];
 
     /// <summary>
     /// When false (default, most faithful), the browser receives raw 3xx responses
@@ -65,6 +66,44 @@ public sealed class SnifferSettings
     {
         get => _forceHttp1;
         set => _forceHttp1 = value;
+    }
+
+    /// <summary>
+    /// Hosts to pass through WITHOUT TLS interception (raw tunnel), one per line/comma.
+    /// Use for endpoints that break under MITM (certificate pinning, etc.). A bare
+    /// host matches it and all its subdomains (e.g. <c>ls.app</c> matches <c>cdn.ls.app</c>).
+    /// Bypassed hosts still show in the list as a tunneled (uninspected) session.
+    /// </summary>
+    public string BypassHosts
+    {
+        get => string.Join("\n", _bypassHosts);
+        set => _bypassHosts = (value ?? string.Empty)
+            .Split(['\n', '\r', ',', ';', ' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(h => h.Trim().TrimStart('*', '.').ToLowerInvariant())
+            .Where(h => h.Length > 0)
+            .Distinct()
+            .ToArray();
+    }
+
+    /// <summary>True when <paramref name="host"/> should be tunneled un-decrypted (exact or a subdomain).</summary>
+    public bool IsBypassed(string host)
+    {
+        var patterns = _bypassHosts;
+        if (patterns.Length == 0)
+        {
+            return false;
+        }
+
+        host = host.ToLowerInvariant();
+        foreach (var p in patterns)
+        {
+            if (host == p || host.EndsWith("." + p, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

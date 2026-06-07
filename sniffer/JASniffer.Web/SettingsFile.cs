@@ -37,6 +37,7 @@ public static class SettingsFile
             settings.ForceHttp1 = saved.ForceHttp1;
             settings.InterceptAllPorts = saved.InterceptAllPorts;
             settings.IgnoreUpstreamCertErrors = saved.IgnoreUpstreamCertErrors;
+            settings.BypassHosts = saved.BypassHosts ?? string.Empty;
         }
         catch (Exception)
         {
@@ -53,7 +54,7 @@ public static class SettingsFile
             var dto = new Persisted(
                 settings.SmartRedirects, settings.MaxRedirects, settings.Capture,
                 settings.UpstreamProxy, settings.FingerprintPreset, settings.ForceHttp1,
-                settings.InterceptAllPorts, settings.IgnoreUpstreamCertErrors);
+                settings.InterceptAllPorts, settings.IgnoreUpstreamCertErrors, settings.BypassHosts);
             File.WriteAllText(path, JsonSerializer.Serialize(dto, Options));
         }
         catch (Exception)
@@ -64,5 +65,5 @@ public static class SettingsFile
 
     private sealed record Persisted(
         bool SmartRedirects, int MaxRedirects, bool Capture, string? UpstreamProxy, string FingerprintPreset, bool ForceHttp1,
-        bool InterceptAllPorts = true, bool IgnoreUpstreamCertErrors = false);
+        bool InterceptAllPorts = true, bool IgnoreUpstreamCertErrors = false, string? BypassHosts = null);
 }

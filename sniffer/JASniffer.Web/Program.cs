@@ -81,6 +81,7 @@ api.MapPost("/settings", (SettingsDto dto, SnifferSettings s, UpstreamRelay rela
     s.ForceHttp1 = dto.ForceHttp1;
     s.InterceptAllPorts = dto.InterceptAllPorts;
     s.IgnoreUpstreamCertErrors = dto.IgnoreUpstreamCertErrors;
+    s.BypassHosts = dto.BypassHosts ?? string.Empty;
     relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1, s.IgnoreUpstreamCertErrors); // rebuilds clients only if these changed
     SettingsFile.Save(s, settingsPath);
     return Settings(s);
@@ -238,7 +239,7 @@ static IResult ServeBody(byte[] body, string? contentType, string name, bool dow
 
 static SettingsDto Settings(SnifferSettings s) =>
     new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.FingerprintPreset, s.ForceHttp1,
-        s.InterceptAllPorts, s.IgnoreUpstreamCertErrors);
+        s.InterceptAllPorts, s.IgnoreUpstreamCertErrors, s.BypassHosts);
 
 // Parses a "Name: Value" per-line header block (as typed in the Requester) into
 // ordered header entries.

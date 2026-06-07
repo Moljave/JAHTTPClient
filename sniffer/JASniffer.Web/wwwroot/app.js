@@ -463,6 +463,7 @@
     $("#tglForceHttp1").addEventListener("change", saveSettings);
     $("#tglInterceptAll").addEventListener("change", saveSettings);
     $("#tglInsecure").addEventListener("change", saveSettings);
+    $("#txtBypass").addEventListener("change", saveSettings);
     $("#btnSelftest").addEventListener("click", runSelfTest);
 
     $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
@@ -523,6 +524,7 @@
       forceHttp1: $("#tglForceHttp1").checked,
       interceptAllPorts: $("#tglInterceptAll").checked,
       ignoreUpstreamCertErrors: $("#tglInsecure").checked,
+      bypassHosts: $("#txtBypass").value,
     };
     await postJson("/api/settings", dto);
     const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
@@ -944,6 +946,7 @@
       $("#tglForceHttp1").checked = s.forceHttp1;
       $("#tglInterceptAll").checked = s.interceptAllPorts;
       $("#tglInsecure").checked = s.ignoreUpstreamCertErrors;
+      $("#txtBypass").value = s.bypassHosts || "";
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
       const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
       if (label) $("#presetLabel").textContent = label;

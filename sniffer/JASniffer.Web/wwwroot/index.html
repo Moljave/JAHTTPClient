@@ -159,6 +159,12 @@
         </div>
 
         <div class="setting">
+          <div class="setting-label">Пропускать без расшифровки (хосты)</div>
+          <textarea id="txtBypass" class="cmp-area" rows="3" spellcheck="false" placeholder="cdn.ls.app&#10;example.com"></textarea>
+          <div class="setting-note">По строке/через запятую. Эти хосты идут сырым туннелем (без MITM) — для сайтов с pinning или тех, что ломаются при перехвате. Хост охватывает и поддомены (<code>ls.app</code> → <code>cdn.ls.app</code>). В списке видны как «tunnel».</div>
+        </div>
+
+        <div class="setting">
           <div class="setting-label">Корневой сертификат (CA)</div>
           <div class="row-buttons">
             <button class="btn" id="btnInstallCa" title="Установить CA в доверенные корневые (Windows, авто)">Install CA</button>
