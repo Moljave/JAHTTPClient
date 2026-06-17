@@ -46,6 +46,15 @@ internal sealed class ProxyHarness : IAsyncDisposable
         var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
         while (DateTime.UtcNow < deadline)
         {
+            if (_run.IsCompleted)
+            {
+                // RunAsync returned before we connected — e.g. it could not bind the port
+                // (it logs and returns rather than throwing). Observe any fault and fail
+                // with a clear cause instead of a misleading timeout.
+                await _run.ConfigureAwait(false);
+                throw new InvalidOperationException($"Proxy host exited before listening on port {Port} (bind failed?).");
+            }
+
             try
             {
                 using var probe = new System.Net.Sockets.TcpClient();

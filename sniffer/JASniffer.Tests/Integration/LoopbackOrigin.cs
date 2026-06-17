@@ -77,7 +77,16 @@ internal sealed class LoopbackOrigin : IDisposable
 
             foreach (var (name, value) in response.Headers)
             {
-                ctx.Response.Headers[name] = value;
+                // Content-Type has a dedicated slot on HttpListenerResponse; routing it
+                // there (rather than the header bag) avoids setting it twice.
+                if (string.Equals(name, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                {
+                    ctx.Response.ContentType = value;
+                }
+                else
+                {
+                    ctx.Response.Headers[name] = value;
+                }
             }
 
             ctx.Response.ContentLength64 = response.Body.Length;
@@ -118,10 +127,18 @@ internal sealed record OriginResponse(int Status, string Reason, string? Content
     public List<(string Name, string Value)> Headers { get; } = [];
 
     public static OriginResponse Text(string text, int status = 200)
-        => new(status, "OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(text));
+        => new(status, ReasonFor(status), "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(text));
 
     public static OriginResponse Json(string json, int status = 200)
-        => new(status, "OK", "application/json", Encoding.UTF8.GetBytes(json));
+        => new(status, ReasonFor(status), "application/json", Encoding.UTF8.GetBytes(json));
+
+    private static string ReasonFor(int status) => status switch
+    {
+        200 => "OK", 201 => "Created", 204 => "No Content", 301 => "Moved Permanently",
+        302 => "Found", 304 => "Not Modified", 400 => "Bad Request", 401 => "Unauthorized",
+        403 => "Forbidden", 404 => "Not Found", 429 => "Too Many Requests",
+        500 => "Internal Server Error", 502 => "Bad Gateway", 503 => "Service Unavailable", _ => "OK",
+    };
 
     public OriginResponse WithHeader(string name, string value)
     {

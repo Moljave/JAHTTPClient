@@ -9,10 +9,17 @@ internal static class RawHttp
 {
     /// <summary>
     /// Sends a verbatim request (request-line + headers + optional body) to a loopback
-    /// port and reads the entire response until the peer closes. The caller should send
-    /// <c>Connection: close</c> so the read terminates at EOF.
+    /// port and parses the response. The caller should send <c>Connection: close</c> so
+    /// the read terminates at EOF.
     /// </summary>
     public static async Task<RawResponse> SendAsync(int port, string requestText, byte[]? body = null)
+        => RawResponse.Parse(await SendRawAsync(port, requestText, body));
+
+    /// <summary>
+    /// Like <see cref="SendAsync"/> but returns the raw response bytes unparsed — used
+    /// when a single connection carries several pipelined responses.
+    /// </summary>
+    public static async Task<byte[]> SendRawAsync(int port, string requestText, byte[]? body = null)
     {
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, port);
@@ -25,7 +32,12 @@ internal static class RawHttp
         }
 
         await stream.FlushAsync();
+        return await ReadToEndAsync(stream);
+    }
 
+    /// <summary>Reads a stream to EOF (bounded by a 30s safety timeout).</summary>
+    public static async Task<byte[]> ReadToEndAsync(Stream stream)
+    {
         using var ms = new MemoryStream();
         var buf = new byte[8192];
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -35,7 +47,7 @@ internal static class RawHttp
             ms.Write(buf, 0, n);
         }
 
-        return RawResponse.Parse(ms.ToArray());
+        return ms.ToArray();
     }
 }
 
@@ -55,7 +67,11 @@ internal sealed record RawResponse(int Status, string Reason, IReadOnlyDictionar
         var head = text[..headerEnd];
         var lines = head.Split("\r\n");
         var statusParts = lines[0].Split(' ', 3);
-        var status = int.Parse(statusParts[1]);
+        if (statusParts.Length < 2 || !int.TryParse(statusParts[1], out var status))
+        {
+            throw new InvalidOperationException("Malformed status line from proxy: " + lines[0]);
+        }
+
         var reason = statusParts.Length > 2 ? statusParts[2] : string.Empty;
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

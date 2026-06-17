@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -22,6 +23,9 @@ internal sealed class TlsLoopbackOrigin : IDisposable
     public int Port { get; }
     public string BaseUrl => $"https://127.0.0.1:{Port}";
     public Func<string, OriginResponse> Handler { get; set; } = _ => OriginResponse.Text("tls-ok");
+
+    /// <summary>Decrypted requests the origin received (target + body) — what the proxy forwarded.</summary>
+    public ConcurrentQueue<(string Target, byte[] Body)> Received { get; } = new();
 
     public TlsLoopbackOrigin()
     {
@@ -73,6 +77,12 @@ internal sealed class TlsLoopbackOrigin : IDisposable
                 var lines = head.Split("\r\n");
                 var target = lines[0].Split(' ').ElementAtOrDefault(1) ?? "/";
 
+                // Read the full request body (Content-Length) before replying — otherwise
+                // responding early can race the proxy's in-flight body write into an RST.
+                // Capturing it also lets tests assert the proxy forwarded the body.
+                var requestBody = await ReadBodyAsync(tls, lines, leftover).ConfigureAwait(false);
+                Received.Enqueue((target, requestBody));
+
                 var response = Handler(target);
                 var sb = new StringBuilder();
                 sb.Append("HTTP/1.1 ").Append(response.Status).Append(' ').Append(response.Reason).Append("\r\n");
@@ -92,13 +102,49 @@ internal sealed class TlsLoopbackOrigin : IDisposable
                 await tls.WriteAsync(Encoding.Latin1.GetBytes(sb.ToString())).ConfigureAwait(false);
                 await tls.WriteAsync(response.Body).ConfigureAwait(false);
                 await tls.FlushAsync().ConfigureAwait(false);
-                _ = leftover; // body (if any) ignored for these tests
             }
         }
         catch
         {
             // torn connection — ignore
         }
+    }
+
+    private static async Task<byte[]> ReadBodyAsync(Stream s, string[] headerLines, byte[] leftover)
+    {
+        var length = 0;
+        foreach (var line in headerLines)
+        {
+            var c = line.IndexOf(':');
+            if (c > 0 && line[..c].Trim().Equals("Content-Length", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(line[(c + 1)..].Trim(), out var n))
+            {
+                length = n;
+                break;
+            }
+        }
+
+        if (length <= 0)
+        {
+            return [];
+        }
+
+        using var ms = new MemoryStream(length);
+        ms.Write(leftover, 0, Math.Min(leftover.Length, length));
+        var buf = new byte[8192];
+        while (ms.Length < length)
+        {
+            var want = Math.Min(buf.Length, length - (int)ms.Length);
+            var read = await s.ReadAsync(buf.AsMemory(0, want)).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            ms.Write(buf, 0, read);
+        }
+
+        return ms.ToArray();
     }
 
     private static async Task<(string? Head, byte[] Leftover)> ReadHeadAsync(Stream s)

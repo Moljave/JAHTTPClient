@@ -23,7 +23,7 @@ public sealed class ConnectMitmIntegrationTests
         await using var proxy = new ProxyHarness(s => s.IgnoreUpstreamCertErrors = true);
         await proxy.WaitUntilReadyAsync();
 
-        var (status, body, leafCn) = await MitmGetAsync(proxy.Port, "127.0.0.1", origin.Port, "/secure?z=9");
+        var (status, body, leafCn) = await MitmSendAsync(proxy.Port, "127.0.0.1", origin.Port, "/secure?z=9");
 
         Assert.Equal(200, status);
         Assert.Equal("secret:/secure?z=9", body);
@@ -53,7 +53,7 @@ public sealed class ConnectMitmIntegrationTests
         // Because the host is bypassed, the proxy raw-tunnels: TLS terminates at the
         // ORIGIN, so the cert we see is the origin's own self-signed cert (CN=127.0.0.1),
         // and the session is recorded as tunneled (uninspected).
-        var (status, body, _) = await MitmGetAsync(proxy.Port, "127.0.0.1", origin.Port, "/x", trustAnything: true);
+        var (status, body, _) = await MitmSendAsync(proxy.Port, "127.0.0.1", origin.Port, "/x", trustAnything: true);
 
         Assert.Equal(200, status);
         Assert.Equal("direct-tls", body);
@@ -62,12 +62,37 @@ public sealed class ConnectMitmIntegrationTests
         Assert.True(session.WasTunneled);
     }
 
+    [Fact]
+    public async Task Connect_MitmForwardsRequestBody_OverHttps()
+    {
+        using var origin = new TlsLoopbackOrigin { Handler = _ => OriginResponse.Text("accepted") };
+        await using var proxy = new ProxyHarness(s => s.IgnoreUpstreamCertErrors = true);
+        await proxy.WaitUntilReadyAsync();
+
+        var (status, body, _) = await MitmSendAsync(
+            proxy.Port, "127.0.0.1", origin.Port, "/upload",
+            method: "POST", body: Encoding.UTF8.GetBytes("mitm-body-payload"), contentType: "application/octet-stream");
+
+        Assert.Equal(200, status);
+        Assert.Equal("accepted", body);
+
+        // The decrypted request body must have been re-issued upstream intact.
+        Assert.True(origin.Received.TryDequeue(out var got));
+        Assert.Equal("/upload", got.Target);
+        Assert.Equal("mitm-body-payload", Encoding.UTF8.GetString(got.Body));
+
+        var session = Assert.Single(proxy.Store.Snapshot());
+        Assert.Equal("POST", session.Method);
+        Assert.True(session.UpstreamOk);
+    }
+
     /// <summary>
     /// Opens a CONNECT tunnel to <paramref name="host"/>:<paramref name="port"/> through the
-    /// proxy, does the TLS handshake, sends a GET, and returns (status, body, leaf-cert subject).
+    /// proxy, does the TLS handshake, sends a request, and returns (status, body, leaf-cert subject).
     /// </summary>
-    private static async Task<(int Status, string Body, string LeafSubject)> MitmGetAsync(
-        int proxyPort, string host, int port, string path, bool trustAnything = true)
+    private static async Task<(int Status, string Body, string LeafSubject)> MitmSendAsync(
+        int proxyPort, string host, int port, string path,
+        string method = "GET", byte[]? body = null, string? contentType = null, bool trustAnything = true)
     {
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, proxyPort);
@@ -94,12 +119,29 @@ public sealed class ConnectMitmIntegrationTests
             ApplicationProtocols = [SslApplicationProtocol.Http11],
         });
 
-        var get = $"GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n";
-        await tls.WriteAsync(Encoding.Latin1.GetBytes(get));
+        var head = new StringBuilder();
+        head.Append(method).Append(' ').Append(path).Append(" HTTP/1.1\r\n");
+        head.Append("Host: ").Append(host).Append(':').Append(port).Append("\r\n");
+        if (contentType is not null)
+        {
+            head.Append("Content-Type: ").Append(contentType).Append("\r\n");
+        }
+
+        if (body is { Length: > 0 })
+        {
+            head.Append("Content-Length: ").Append(body.Length).Append("\r\n");
+        }
+
+        head.Append("Connection: close\r\n\r\n");
+        await tls.WriteAsync(Encoding.Latin1.GetBytes(head.ToString()));
+        if (body is { Length: > 0 })
+        {
+            await tls.WriteAsync(body);
+        }
+
         await tls.FlushAsync();
 
-        var raw = await ReadToEndAsync(tls);
-        var resp = RawResponse.Parse(raw);
+        var resp = RawResponse.Parse(await RawHttp.ReadToEndAsync(tls));
         return (resp.Status, resp.BodyText, leafSubject);
     }
 
@@ -124,19 +166,5 @@ public sealed class ConnectMitmIntegrationTests
         }
 
         return Encoding.Latin1.GetString(ms.ToArray());
-    }
-
-    private static async Task<byte[]> ReadToEndAsync(Stream s)
-    {
-        using var ms = new MemoryStream();
-        var buf = new byte[8192];
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        int n;
-        while ((n = await s.ReadAsync(buf, cts.Token)) > 0)
-        {
-            ms.Write(buf, 0, n);
-        }
-
-        return ms.ToArray();
     }
 }

@@ -133,32 +133,11 @@ public sealed class ProxyServerIntegrationTests
             $"GET {origin.BaseUrl}/one HTTP/1.1\r\nHost: 127.0.0.1:{origin.Port}\r\n\r\n" +
             $"GET {origin.BaseUrl}/two HTTP/1.1\r\nHost: 127.0.0.1:{origin.Port}\r\nConnection: close\r\n\r\n";
 
-        var raw = await RawHttpRaw(proxy.Port, req);
+        var raw = await RawHttp.SendRawAsync(proxy.Port, req);
         var text = Encoding.Latin1.GetString(raw);
 
         Assert.Contains("echo:/one", text);
         Assert.Contains("echo:/two", text);
         Assert.Equal(2, proxy.Store.Snapshot().Count);
-    }
-
-    // Reads the entire stream (possibly several pipelined responses) until EOF.
-    private static async Task<byte[]> RawHttpRaw(int port, string requestText)
-    {
-        using var client = new System.Net.Sockets.TcpClient();
-        await client.ConnectAsync(System.Net.IPAddress.Loopback, port);
-        var stream = client.GetStream();
-        await stream.WriteAsync(Encoding.Latin1.GetBytes(requestText));
-        await stream.FlushAsync();
-
-        using var ms = new MemoryStream();
-        var buf = new byte[8192];
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        int n;
-        while ((n = await stream.ReadAsync(buf, cts.Token)) > 0)
-        {
-            ms.Write(buf, 0, n);
-        }
-
-        return ms.ToArray();
     }
 }
