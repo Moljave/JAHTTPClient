@@ -33,37 +33,17 @@ public static class Ja3SelfTest
 {
     public static async Task<Ja3Report> CaptureAsync(Ja3Preset preset, bool forceHttp1, string presetLabel, CancellationToken ct)
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-
-        var capture = AcceptHelloAsync(listener, ct);
-        var client = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
-        {
-            EnableJa3Fingerprinting = true,
-            FingerprintPreset = preset,
-            ForceHttp1 = forceHttp1,
-            InsecureSkipVerify = true,
-            Timeout = TimeSpan.FromSeconds(3),
-            MaxRetries = 0,
-        });
-
-        // Fire the request: the engine dials loopback and sends its ClientHello,
-        // which we read. The handshake never completes (we don't reply), so the
-        // request fails — that's fine, we only wanted the ClientHello.
-        var send = Task.Run(() => client.SendAsync(new HttpRequestMessage(HttpMethod.Get, $"https://127.0.0.1:{port}/"), ct), ct);
-        _ = send.ContinueWith(static t => { _ = t.Exception; }, TaskScheduler.Default);
-
-        byte[] hello;
-        try
-        {
-            hello = await capture.ConfigureAwait(false);
-        }
-        finally
-        {
-            listener.Stop();
-            client.Dispose();
-        }
+        var hello = await CaptureRawHelloAsync(
+            new ChromeHttpClientOptions
+            {
+                EnableJa3Fingerprinting = true,
+                FingerprintPreset = preset,
+                ForceHttp1 = forceHttp1,
+                InsecureSkipVerify = true,
+                Timeout = TimeSpan.FromSeconds(3),
+                MaxRetries = 0,
+            },
+            ct).ConfigureAwait(false);
 
         if (hello.Length < 50 || hello[0] != 0x16)
         {
@@ -77,6 +57,33 @@ public static class Ja3SelfTest
         catch (Exception ex)
         {
             return new Ja3Report(presetLabel, false, "Не удалось разобрать ClientHello: " + ex.Message, hello.Length, 0, 0, false, false, false, string.Empty, string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Dials loopback with a client built from <paramref name="options"/> (a preset or a
+    /// custom fingerprint) and returns the raw ClientHello bytes it emits. The handshake is
+    /// never completed — we only want the hello. Returns an empty array if none arrived.
+    /// </summary>
+    internal static async Task<byte[]> CaptureRawHelloAsync(ChromeHttpClientOptions options, CancellationToken ct)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var capture = AcceptHelloAsync(listener, ct);
+        var client = new TlsClientChromeHttpClient(options);
+        var send = Task.Run(() => client.SendAsync(new HttpRequestMessage(HttpMethod.Get, $"https://127.0.0.1:{port}/"), ct), ct);
+        _ = send.ContinueWith(static t => { _ = t.Exception; }, TaskScheduler.Default);
+
+        try
+        {
+            return await capture.ConfigureAwait(false);
+        }
+        finally
+        {
+            listener.Stop();
+            client.Dispose();
         }
     }
 

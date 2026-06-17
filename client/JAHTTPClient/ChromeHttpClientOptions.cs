@@ -1,5 +1,6 @@
 using System.Net;
 using JAHTTPClient.Fingerprinting;
+using JAHTTPClient.Interop;
 
 namespace JAHTTPClient;
 
@@ -18,6 +19,17 @@ public sealed class ChromeHttpClientOptions
 
     /// <summary>Which browser fingerprint to emulate. Defaults to <see cref="Ja3Preset.Chrome"/> (Chrome 148).</summary>
     public Ja3Preset FingerprintPreset { get; set; } = Ja3Preset.Chrome;
+
+    /// <summary>
+    /// A fully custom TLS/HTTP-2 fingerprint (a captured ClientHello expressed as a JA3
+    /// string plus its extension contents — supported versions, key-share curves,
+    /// signature algorithms, ALPN, cert-compression — and optional H2 settings). When set
+    /// it overrides <see cref="FingerprintPreset"/>/<see cref="TlsIdentifier"/> on the native
+    /// side and the captured ClientHello is reproduced verbatim (extension order not
+    /// permuted). The preset's User-Agent / client-hint headers still apply unless overridden.
+    /// </summary>
+    public CustomTlsClient? CustomTlsClient { get; set; }
+
 
     /// <summary>
     /// Override the native TLS profile identifier (e.g. <c>"chrome_146"</c>)

@@ -51,9 +51,14 @@ public sealed class CustomTlsClient
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? KeyShareCurves { get; set; }
 
-    [JsonPropertyName("certCompressionAlgo")]
+    /// <summary>
+    /// Certificate-compression algorithms (e.g. <c>brotli</c>). The native contract field
+    /// is <c>certCompressionAlgos</c> (a list); supplying it is required whenever the JA3
+    /// includes the compress_certificate extension (27), else the spec build fails.
+    /// </summary>
+    [JsonPropertyName("certCompressionAlgos")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? CertCompressionAlgo { get; set; }
+    public List<string>? CertCompressionAlgos { get; set; }
 
     [JsonPropertyName("alpnProtocols")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

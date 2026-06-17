@@ -194,9 +194,10 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         return new TlsRequestPayload
         {
             SessionId = _sessionId,
-            // The native library always needs a profile; impersonation toggles
-            // the client hints and ClientHello extension shuffling, not the base.
-            TlsClientIdentifier = _profile.TlsIdentifier,
+            // A captured custom fingerprint overrides the built-in profile; the two are
+            // mutually exclusive in the native contract.
+            TlsClientIdentifier = _options.CustomTlsClient is null ? _profile.TlsIdentifier : null,
+            CustomTlsClient = _options.CustomTlsClient,
             RequestUrl = uri.AbsoluteUri,
             RequestMethod = method.Method,
             RequestBody = body,
@@ -211,7 +212,9 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             // verbatim Cookie header) and never cross-contaminates hosts/tabs.
             WithDefaultCookieJar = !_options.WithoutCookieJar,
             WithoutCookieJar = _options.WithoutCookieJar,
-            WithRandomTlsExtensionOrder = _options.EnableJa3Fingerprinting,
+            // A captured JA3 already encodes the exact extension order — reproduce it
+            // verbatim rather than re-permuting.
+            WithRandomTlsExtensionOrder = _options.CustomTlsClient is null && _options.EnableJa3Fingerprinting,
             ForceHttp1 = _options.ForceHttp1,
             TimeoutMilliseconds = (int)Math.Clamp(_options.Timeout.TotalMilliseconds, 1, int.MaxValue),
             ProxyUrl = _proxy,
