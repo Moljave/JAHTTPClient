@@ -21,4 +21,10 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
   </ItemGroup>
 
+  <!-- The HTTP/1.1 wire reader/writer and request parser are internal; let the
+       test project exercise them directly. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="JASniffer.Tests" />
+  </ItemGroup>
+
 </Project>

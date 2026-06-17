@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit/integration tests for the JASniffer debugging proxy. Covers the pure logic
+    (parsing, proxy-URL normalization, settings, .saz export, the session store and
+    certificate authority) plus the HTTP/1.1 wire reader/writer in JASniffer.Proxy.
+    Framework/language settings come from the repo-level Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../JASniffer.Core/JASniffer.Core.csproj" />
+    <ProjectReference Include="../JASniffer.Proxy/JASniffer.Proxy.csproj" />
+    <ProjectReference Include="../JASniffer.Web/JASniffer.Web.csproj" />
+  </ItemGroup>
+
+  <!-- DtoMapper / settings persistence live in the Web host (ASP.NET Core). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

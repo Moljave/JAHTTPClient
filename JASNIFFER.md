@@ -372,7 +372,7 @@ TCP/TLS‑туннелем: браузер продолжает работать
 остаётся частью своего `JAHTTPClient.sln`.
 
 ```
-JASniffer.sln            отдельное решение снифера (3 проекта + движок JAHTTPClient)
+JASniffer.sln            отдельное решение снифера (4 проекта + движок JAHTTPClient)
 src/JAHTTPClient/        существующий движок (Chrome JA3). Минимальное добавление: опция WithoutCookieJar.
 sniffer/JASniffer.Core/  модели сессий, SessionStore, генерация/кэш сертификатов (CertificateAuthority),
                          разбор (params/cookies/auth), экспорт .saz (SazExporter), настройки.
@@ -380,10 +380,33 @@ sniffer/JASniffer.Proxy/ TcpListener :8866, разбор HTTP/CONNECT (Http1Read
                          TLS‑as‑server, ретрансляция через JAHTTPClient (UpstreamRelay), сырой туннель.
 sniffer/JASniffer.Web/   ASP.NET Core хост: статика wwwroot (SPA), REST API, SignalR hub,
                          прокси как hosted‑service. Стартовый проект.
+sniffer/JASniffer.Tests/ xUnit‑тесты: модульные (парсинг, .saz, store, сертификаты, HTTP/1.1‑ридер)
+                         + интеграционные на реальном движке по loopback (MITM, редиректы, gzip, JA3).
 ```
 
 SPA — vanilla JS/HTML/CSS из `wwwroot` (без Node‑сборки); клиент SignalR
 вендорится в `wwwroot/lib/signalr.min.js`.
+
+### Тесты
+
+```bash
+dotnet test JASniffer.sln          # все 156 тестов
+```
+
+Покрытие — два слоя:
+
+- **Модульные** (без сети): `HttpParsing` (query/cookies/auth/charset), `ProxyUrl`
+  (нормализация всех форматов прокси), `SnifferSettings` (bypass‑хосты, клампы),
+  `SazExporter` (структура архива Fiddler, пересчёт `Content-Length`, пропуск
+  туннелей), `SessionStore` (события, вытеснение, удаление), `CertificateAuthority`
+  (CA/лиф, SAN, срок ≤ 398 дней), `Http1Reader`/`Http1Request` (header‑блок,
+  chunked, folding, upgrade/SSE, keep‑alive), `WireResponse` (hop‑by‑hop, длина),
+  `SettingsFile` (round‑trip), `DtoMapper`.
+- **Интеграционные** (реальный `JAHTTPClient` по loopback, **без внешней сети**):
+  plain‑HTTP проксирование и keep‑alive, перехват **HTTPS через CONNECT** (лиф‑серт
+  на лету + ALPN), bypass‑туннель, умные редиректы (faithful/follow), декодирование
+  gzip без двойного `Content-Encoding`, 502 при недоступном апстриме, локальный
+  JA3 self‑test против настоящего ClientHello Chrome/Firefox.
 
 ### REST API (для справки)
 

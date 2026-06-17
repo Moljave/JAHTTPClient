@@ -268,12 +268,17 @@ public static class HttpParsing
             var idx = contentType.IndexOf("charset=", StringComparison.OrdinalIgnoreCase);
             if (idx >= 0)
             {
-                var cs = contentType[(idx + 8)..].Trim().Trim('"');
+                // Cut the value at the next parameter (';') BEFORE stripping quotes —
+                // otherwise a quoted charset followed by another param (charset="x"; y=z)
+                // keeps a stray quote and the lookup silently falls back to UTF-8.
+                var cs = contentType[(idx + 8)..].Trim();
                 var semi = cs.IndexOf(';');
                 if (semi >= 0)
                 {
                     cs = cs[..semi].Trim();
                 }
+
+                cs = cs.Trim('"');
 
                 try
                 {
