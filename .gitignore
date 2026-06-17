@@ -33,3 +33,10 @@ native/go.sum
 /ca.pem
 /*.saz
 /Project.zip
+
+# Publish output and packaged deliverables (regenerable: produced by `dotnet
+# publish` / cross-builds, not source — never commit these large binaries).
+/dist-win/
+/dist-linux/
+/JASniffer-win-x64/
+/JASniffer-win-x64.zip
