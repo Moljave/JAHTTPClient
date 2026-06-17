@@ -5,6 +5,7 @@ using JASniffer.Core.Export;
 using JASniffer.Core.Models;
 using JASniffer.Web;
 using JASniffer.Proxy;
+using JASniffer.Proxy.Fingerprint;
 using JASniffer.Proxy.Udp;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,6 +25,18 @@ builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<SessionStore>();
 builder.Services.AddSingleton(CertificateAuthority.LoadOrCreate(caDir));
 builder.Services.AddSingleton<UpstreamRelay>();
+var capturePort = builder.Configuration.GetValue("JASniffer:CapturePort", proxyPort + 1);
+builder.Services.AddSingleton(new FingerprintStore(
+    Path.Combine(caDir ?? CertificateAuthority.DefaultStoreDirectory, "fingerprints.json")));
+builder.Services.AddSingleton(sp => new FingerprintCaptureServer(
+    sp.GetRequiredService<FingerprintStore>(),
+    sp.GetRequiredService<CertificateAuthority>(),
+    sp.GetRequiredService<ILogger<FingerprintCaptureServer>>())
+{
+    Port = capturePort,
+    CaptureHost = "localhost",
+});
+builder.Services.AddHostedService<CaptureHostedService>();
 builder.Services.AddSingleton<SystemProxy>();
 builder.Services.AddSingleton<UdpCaptureService>();
 var winDivertUrl = builder.Configuration.GetValue("JASniffer:WinDivertUrl", WinDivertInstaller.DefaultUrl)!;
@@ -211,6 +224,40 @@ api.MapPost("/compose", async (ComposeRequest body, UpstreamRelay relay, Session
 api.MapGet("/fingerprint-selftest", async (UpstreamRelay relay, CancellationToken ct) =>
     Results.Ok(await relay.CaptureClientHelloAsync(ct)));
 
+// Custom fingerprint capture: list captured fingerprints + the local capture URL the
+// browser visits; activate one (applied to the upstream leg) or delete it.
+api.MapGet("/fingerprints", (FingerprintStore fps) => new FingerprintsDto(
+    $"https://localhost:{capturePort}/",
+    fps.ActiveId,
+    fps.All().Select(f => new FingerprintDto(f.Id, f.Label, f.Ja3, f.Ja3Md5, f.Ja4, f.UserAgent, f.CapturedUtc)).ToArray()));
+
+api.MapPost("/fingerprints/active", (FpActiveRequest body, FingerprintStore fps, UpstreamRelay relay) =>
+{
+    if (!fps.SetActive(string.IsNullOrWhiteSpace(body.Id) ? null : body.Id))
+    {
+        return Results.NotFound();
+    }
+
+    relay.ApplyFingerprint(fps.ActiveSpec);
+    return Results.Ok(new { activeId = fps.ActiveId });
+});
+
+api.MapDelete("/fingerprints/{id}", (string id, FingerprintStore fps, UpstreamRelay relay) =>
+{
+    var wasActive = fps.ActiveId == id;
+    if (!fps.Remove(id))
+    {
+        return Results.NotFound();
+    }
+
+    if (wasActive)
+    {
+        relay.ApplyFingerprint(fps.ActiveSpec);
+    }
+
+    return Results.NoContent();
+});
+
 app.MapHub<SessionHub>("/hub/sessions");
 app.MapFallbackToFile("index.html");
 
@@ -224,6 +271,8 @@ app.Lifetime.ApplicationStarted.Register(() =>
     log.LogInformation("JASniffer proxy : 127.0.0.1:{Port}", proxyPort);
     log.LogInformation("Root CA         : {Subject}", ca.Subject);
     log.LogInformation("CA store        : {Dir} (install rootCA.cer as a trusted root, or use the UI button)", CertificateAuthority.DefaultStoreDirectory);
+    // Restore the persisted active custom fingerprint (if any) onto the upstream leg.
+    app.Services.GetRequiredService<UpstreamRelay>().ApplyFingerprint(app.Services.GetRequiredService<FingerprintStore>().ActiveSpec);
     BrowserLauncher.Open(uiUrl);
 });
 
@@ -279,3 +328,5 @@ internal sealed record TestProxyRequest(string? Proxy);
 internal sealed record UdpToggle(bool Enabled);
 
 internal sealed record ComposeRequest(string? Method, string? Url, string? Headers, string? Body);
+
+internal sealed record FpActiveRequest(string? Id);

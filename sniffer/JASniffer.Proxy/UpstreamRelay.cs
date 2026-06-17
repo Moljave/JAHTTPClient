@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using JAHTTPClient;
 using JAHTTPClient.Fingerprinting;
+using JAHTTPClient.Interop;
 using JASniffer.Core;
 using JASniffer.Core.Models;
 using JASniffer.Core.Parsing;
@@ -49,6 +50,10 @@ public sealed class UpstreamRelay : IDisposable
     private string? _proxyUrl;
     private bool _proxyRotating;
 
+    // A captured custom fingerprint that overrides the preset's TLS/HTTP-2 on the
+    // upstream leg (null = use the preset). Swapped under _swap, baked at build time.
+    private CustomTlsClient? _customFingerprint;
+
     /// <summary>Display label for the active fingerprint preset, e.g. <c>Chrome 148</c>.</summary>
     public string CurrentPresetLabel { get; private set; }
 
@@ -61,8 +66,37 @@ public sealed class UpstreamRelay : IDisposable
         _proxyUrl = settings.UpstreamProxy;
         _proxyRotating = settings.RotatingProxy;
         CurrentPresetLabel = LabelFor(_preset);
-        (_faithful, _follow) = BuildClients(_preset, _forceHttp1, _insecure, settings.MaxRedirects);
+        (_faithful, _follow) = BuildClients(_preset, _forceHttp1, _insecure, settings.MaxRedirects, _customFingerprint);
         ApplyProxyToClients();
+    }
+
+    /// <summary>
+    /// Applies a captured custom fingerprint (or clears it with <see langword="null"/>) on the
+    /// upstream leg, rebuilding the clients. The cookie jar / connection pool is recreated; the
+    /// egress proxy is reapplied. No-op if unchanged.
+    /// </summary>
+    public void ApplyFingerprint(CustomTlsClient? spec)
+    {
+        lock (_swap)
+        {
+            if (ReferenceEquals(spec, _customFingerprint))
+            {
+                return;
+            }
+
+            var (newFaithful, newFollow) = BuildClients(_preset, _forceHttp1, _insecure, _settings.MaxRedirects, spec);
+            var oldFaithful = _faithful;
+            var oldFollow = _follow;
+            _faithful = newFaithful;
+            _follow = newFollow;
+            _customFingerprint = spec;
+            ApplyProxyToClients();
+
+            _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
+            {
+                try { oldFaithful.Dispose(); oldFollow.Dispose(); } catch { /* best effort */ }
+            });
+        }
     }
 
     /// <summary>
@@ -81,7 +115,7 @@ public sealed class UpstreamRelay : IDisposable
                 return;
             }
 
-            var (newFaithful, newFollow) = BuildClients(preset, forceHttp1, insecure, _settings.MaxRedirects);
+            var (newFaithful, newFollow) = BuildClients(preset, forceHttp1, insecure, _settings.MaxRedirects, _customFingerprint);
             var oldFaithful = _faithful;
             var oldFollow = _follow;
 
@@ -101,12 +135,13 @@ public sealed class UpstreamRelay : IDisposable
     }
 
     private static (TlsClientChromeHttpClient Faithful, TlsClientChromeHttpClient Follow) BuildClients(
-        Ja3Preset preset, bool forceHttp1, bool insecure, int maxRedirects)
+        Ja3Preset preset, bool forceHttp1, bool insecure, int maxRedirects, CustomTlsClient? customFingerprint)
     {
         var faithful = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
         {
             EnableJa3Fingerprinting = true,
             FingerprintPreset = preset,
+            CustomTlsClient = customFingerprint,
             AllowAutoRedirect = false,
             WithoutCookieJar = true,
             ForceHttp1 = forceHttp1,
@@ -118,6 +153,7 @@ public sealed class UpstreamRelay : IDisposable
         {
             EnableJa3Fingerprinting = true,
             FingerprintPreset = preset,
+            CustomTlsClient = customFingerprint,
             AllowAutoRedirect = true,
             MaxAutomaticRedirections = maxRedirects,
             WithoutCookieJar = false,

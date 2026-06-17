@@ -265,3 +265,14 @@ pre.raw { margin: 0; white-space: pre-wrap; word-break: break-word; font-family:
 .onboard-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
 .onboard ol { line-height: 1.75; padding-left: 20px; margin: 0 0 6px; }
 .onboard .muted { margin-top: 16px; font-size: 12px; }
+
+/* captured fingerprints list (Settings) */
+.fp-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.fp-item { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border: 1px solid var(--border, #262b36); border-radius: 8px; padding: 8px 10px; }
+.fp-item.active { border-color: #46d369; }
+.fp-main { min-width: 0; }
+.fp-label { font-weight: 600; }
+.fp-badge { font-size: 11px; color: #46d369; border: 1px solid #46d369; border-radius: 6px; padding: 0 6px; margin-left: 6px; }
+.fp-ua { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
+.fp-actions { display: flex; gap: 6px; flex: 0 0 auto; }

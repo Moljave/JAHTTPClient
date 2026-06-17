@@ -19,6 +19,7 @@
     follow: true,
     autoBypassCloudflare: true,
     cfFlashed: new Set(),   // hosts we've already toasted a CF-challenge hint for
+    captureUrl: null,       // local fingerprint-capture page URL
     // Resender
     rsDetail: null,        // last response detail shown in the Resender
     rsResTab: "headers",
@@ -492,8 +493,10 @@
     $("#btnTestProxy").addEventListener("click", testProxy);
     $("#btnSelftest").addEventListener("click", runSelfTest);
 
-    $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
+    $("#btnSettings").addEventListener("click", () => { openModal("settingsModal"); loadFingerprints(); });
     $("#settingsClose").addEventListener("click", () => closeModal("settingsModal"));
+    $("#btnCapture").addEventListener("click", openCapture);
+    $("#btnFpRefresh").addEventListener("click", loadFingerprints);
 
     // Resender
     $("#btnResender").addEventListener("click", () => openResender(state.detail || null));
@@ -584,6 +587,62 @@
         `JA3 = <b>${r.ja3Md5}</b><br><span class="muted" style="word-break:break-all">${escapeHtml(r.ja3)}</span>` +
         (real ? "" : "<br><span class=\"muted\">Похоже, исходящий TLS перехватывается прокси/инспектором — наружу уходит его отпечаток, не движка.</span>");
     } catch { out.textContent = "Не удалось снять отпечаток."; }
+  }
+
+  // ---- custom fingerprint capture -----------------------------------------
+  async function loadFingerprints() {
+    try {
+      const r = await getJson("/api/fingerprints");
+      state.captureUrl = r.captureUrl;
+      renderFingerprints(r);
+    } catch { /* ignore */ }
+  }
+
+  function renderFingerprints(r) {
+    const box = $("#fpList");
+    if (!box) return;
+    if (!r.items.length) {
+      box.innerHTML = note("Пока нет захваченных отпечатков. Нажмите «Снять отпечаток браузера».");
+      return;
+    }
+    box.innerHTML = r.items.map((f) => {
+      const active = f.id === r.activeId;
+      return `<div class="fp-item${active ? " active" : ""}">
+        <div class="fp-main">
+          <div class="fp-label">${escapeHtml(f.label)}${active ? ' <span class="fp-badge">активен</span>' : ""}</div>
+          <div class="muted">JA4 <code>${escapeHtml(f.ja4)}</code> · JA3 ${escapeHtml(f.ja3Md5)}</div>
+          <div class="muted fp-ua">${escapeHtml(f.userAgent || "")}</div>
+        </div>
+        <div class="fp-actions">
+          <button class="btn" data-fpuse="${f.id}">${active ? "Сбросить" : "Использовать"}</button>
+          <button class="btn ghost" data-fpdel="${f.id}" title="Удалить">✕</button>
+        </div>
+      </div>`;
+    }).join("");
+    box.querySelectorAll("[data-fpuse]").forEach((b) =>
+      b.addEventListener("click", () => useFingerprint(b.dataset.fpuse, r.activeId)));
+    box.querySelectorAll("[data-fpdel]").forEach((b) =>
+      b.addEventListener("click", () => deleteFingerprint(b.dataset.fpdel)));
+  }
+
+  function openCapture() {
+    window.open(state.captureUrl || "/", "_blank");
+    flash("Открыта страница захвата — снимите отпечаток в нужном браузере, затем «Обновить»");
+  }
+
+  async function useFingerprint(id, activeId) {
+    try {
+      await postJson("/api/fingerprints/active", { id: id === activeId ? "" : id }); // toggle off if already active
+      flash(id === activeId ? "Кастомный отпечаток сброшен" : "Отпечаток применён к апстриму");
+      loadFingerprints();
+      const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
+      $("#presetLabel").textContent = id === activeId ? label : "custom";
+    } catch { flash("Не удалось применить отпечаток"); }
+  }
+
+  async function deleteFingerprint(id) {
+    try { await fetch("/api/fingerprints/" + id, { method: "DELETE" }); loadFingerprints(); }
+    catch { /* ignore */ }
   }
 
   // ---- modals + UDP install + composer ------------------------------------

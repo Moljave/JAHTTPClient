@@ -147,6 +147,16 @@
         </div>
 
         <div class="setting">
+          <div class="setting-label">Кастомный отпечаток (захват из браузера)</div>
+          <div class="setting-note">Снимите настоящий отпечаток <b>своего браузера</b> и отправляйте апстрим‑запросы с ним. Откройте страницу захвата в том браузере, чей отпечаток нужен (требуется установленный CA), вернитесь сюда и нажмите «Использовать». Захватывается TLS‑слой (JA3/JA4 + содержимое расширений); HTTP/2‑отпечаток берётся из пресета.</div>
+          <div class="row-buttons">
+            <button class="btn" id="btnCapture" type="button" title="Открыть локальную страницу захвата в новой вкладке">Снять отпечаток браузера</button>
+            <button class="btn ghost" id="btnFpRefresh" type="button" title="Обновить список захваченных">Обновить</button>
+          </div>
+          <div id="fpList" class="fp-list"></div>
+        </div>
+
+        <div class="setting">
           <div class="setting-label">Протокол и поведение</div>
           <div class="toggles">
             <label class="toggle" title="Перехватывать (MITM) HTTPS на любом порту, а не только 443/8443 — нужно для локальных dev‑серверов на нестандартных портах"><input type="checkbox" id="tglInterceptAll" checked /> <span>Перехват HTTPS на всех портах</span></label>

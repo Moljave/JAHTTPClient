@@ -82,6 +82,13 @@ public sealed record StatusDto(
     bool UdpRunning,
     bool WinDivertInstalled);
 
+/// <summary>One captured browser fingerprint shown in the Fingerprints tab.</summary>
+public sealed record FingerprintDto(
+    string Id, string Label, string Ja3, string Ja3Md5, string Ja4, string? UserAgent, string CapturedUtc);
+
+/// <summary>Fingerprints tab payload: the local capture URL, the active id, and the captured list.</summary>
+public sealed record FingerprintsDto(string CaptureUrl, string? ActiveId, IReadOnlyList<FingerprintDto> Items);
+
 /// <summary>Maps capture models to the wire DTOs, decoding textual bodies for display.</summary>
 public static class DtoMapper
 {
