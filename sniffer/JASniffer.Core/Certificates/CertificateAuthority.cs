@@ -17,7 +17,10 @@ public sealed class CertificateAuthority
     private const string CaSubject = "CN=JASniffer Root CA, O=JASniffer, OU=Debugging Proxy";
 
     private readonly X509Certificate2 _caCertificate;
-    private readonly ConcurrentDictionary<string, X509Certificate2> _leafCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Lazy<> so a host requested concurrently for the first time mints exactly one leaf
+    // cert (GetOrAdd's factory can run more than once, but only one Lazy.Value executes).
+    private readonly ConcurrentDictionary<string, Lazy<X509Certificate2>> _leafCache = new(StringComparer.OrdinalIgnoreCase);
 
     private CertificateAuthority(X509Certificate2 caCertificate) => _caCertificate = caCertificate;
 
@@ -100,7 +103,7 @@ public sealed class CertificateAuthority
     public X509Certificate2 GetServerCertificate(string host)
     {
         var key = host.ToLowerInvariant();
-        return _leafCache.GetOrAdd(key, CreateLeafCertificate);
+        return _leafCache.GetOrAdd(key, k => new Lazy<X509Certificate2>(() => CreateLeafCertificate(k))).Value;
     }
 
     private X509Certificate2 CreateLeafCertificate(string host)

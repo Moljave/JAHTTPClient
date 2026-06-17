@@ -30,6 +30,11 @@ public sealed partial class UdpCaptureService(
     private const string Filter =
         "udp and (udp.DstPort == 53 or udp.SrcPort == 53 or udp.DstPort == 443 or udp.SrcPort == 443)";
 
+    // Cap the live 4-tuple map: QUIC uses ephemeral client ports, so over a long capture
+    // the distinct-flow count grows without bound. When exceeded we drop the map; active
+    // flows simply re-register (one extra session each) — memory stays bounded.
+    private const int MaxFlows = 16384;
+
     private const int LayerNetwork = 0;
     private const ulong FlagSniff = 0x0001;
     private const ulong FlagRecvOnly = 0x0008;
@@ -237,6 +242,11 @@ public sealed partial class UdpCaptureService(
         };
 
         store.Add(session);
+        if (_flows.Count >= MaxFlows)
+        {
+            _flows.Clear();
+        }
+
         _flows[key] = session.Id;
         return session;
     }

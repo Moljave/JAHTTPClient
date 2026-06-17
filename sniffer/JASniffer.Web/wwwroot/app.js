@@ -17,6 +17,7 @@
     methods: new Set(),
     types: new Set(),
     follow: true,
+    maxRedirects: 10,      // restored from /settings; preserved across saves
     // Resender
     rsDetail: null,        // last response detail shown in the Resender
     rsResTab: "headers",
@@ -171,7 +172,7 @@
     const res = s.isUdp ? "UDP" : s.wasTunneled ? "TUN" : s.error ? "ERR" : (s.status || "…");
     const resCls = s.isUdp ? "s-udp" : s.wasTunneled ? "" : statusClass(s);
     const proto = s.isUdp ? s.scheme : s.wasTunneled ? "tunnel" : (s.scheme + (s.responseHttpVersion ? " " + (s.responseHttpVersion.startsWith("2") ? "h2" : "h1") : ""));
-    const size = special ? formatBytes(s.tunnelBytesUp + s.tunnelBytesDown) : formatBytes(s.bodyLength);
+    const size = special ? formatBytes((s.tunnelBytesUp || 0) + (s.tunnelBytesDown || 0)) : formatBytes(s.bodyLength);
     return `<div class="grid-row${cls}" data-id="${s.id}" style="top:${i * ROW_H}px">
       <div class="col col-id">${s.id}</div>
       <div class="col col-res ${resCls}">${res}</div>
@@ -392,7 +393,7 @@
       });
     }
     container.querySelectorAll("[data-dl]").forEach((n) =>
-      n.addEventListener("click", () => window.open(`/api/sessions/${n.dataset.id}/${n.dataset.dl}-body?download=1`, "_blank")));
+      n.addEventListener("click", () => window.open(`/api/sessions/${n.dataset.id}/${n.dataset.dl}-body?download=true`, "_blank")));
     container.querySelectorAll("[data-hex]").forEach((n) => loadHex(n));
   }
 
@@ -532,7 +533,7 @@
   async function saveSettings() {
     const dto = {
       smartRedirects: $("#tglRedirects").checked,
-      maxRedirects: 10,
+      maxRedirects: state.maxRedirects || 10,
       capture: $("#tglCapture").checked,
       upstreamProxy: $("#txtProxy").value,
       rotatingProxy: $("#tglRotating").checked,
@@ -628,7 +629,7 @@
   }
 
   function setHeaderRows(headers) {
-    if (state.rsRawHeaders) { rs("rsHeadersRaw").value = headers.map((h) => h.name + ": " + h.value).join("\n"); return; }
+    if (state.rsRawHeaders) { rs("rsHeadersRaw").value = headers.filter((h) => h.on !== false).map((h) => h.name + ": " + h.value).join("\n"); return; }
     rs("rsHeaders").innerHTML = headers.map(headerRowHtml).join("");
   }
 
@@ -834,7 +835,7 @@
       case "remove": removeSession(id); return;
       case "copyurl": if (s && await copyText(s.url)) flash("URL скопирован"); return;
       case "open": if (s) window.open(s.url, "_blank"); return;
-      case "save": window.open(`/api/sessions/${id}/response-body?download=1`, "_blank"); return;
+      case "save": window.open(`/api/sessions/${id}/response-body?download=true`, "_blank"); return;
       case "hostonly": if (s) { state.filter.host = s.host; scheduleRender(); } return;
       case "hosthide": if (s) { state.hiddenHosts.add(s.host); scheduleRender(); } return;
       case "bypasshost": if (s) await addBypassHost(s.host); return;
@@ -979,6 +980,7 @@
       $("#txtBypass").value = s.bypassHosts || "";
       $("#txtProxy").value = s.upstreamProxy || "";
       $("#tglRotating").checked = s.rotatingProxy;
+      state.maxRedirects = s.maxRedirects > 0 ? s.maxRedirects : 10;
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
       const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
       if (label) $("#presetLabel").textContent = label;

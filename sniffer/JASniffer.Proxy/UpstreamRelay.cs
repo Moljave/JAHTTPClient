@@ -40,9 +40,10 @@ public sealed class UpstreamRelay : IDisposable
     private readonly ConcurrentDictionary<string, string?> _hostIpCache = new(StringComparer.OrdinalIgnoreCase);
 
     // Swapped atomically by Reconfigure when the fingerprint preset or forced HTTP
-    // version changes (both are baked at client construction in the engine).
-    private TlsClientChromeHttpClient _faithful;
-    private TlsClientChromeHttpClient _follow;
+    // version changes (both are baked at client construction in the engine). volatile so
+    // a concurrent RelayAsync reading them lock-free observes the post-swap instance.
+    private volatile TlsClientChromeHttpClient _faithful;
+    private volatile TlsClientChromeHttpClient _follow;
     private Ja3Preset _preset;
     private bool _forceHttp1;
     private bool _insecure;
@@ -93,10 +94,13 @@ public sealed class UpstreamRelay : IDisposable
             CurrentPresetLabel = LabelFor(preset);
             ApplyProxyToClients(); // the fresh clients start direct — restore the egress proxy
 
-            _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
+            // Dispose the superseded clients after a grace longer than the request
+            // timeout (100 s), so a request still in flight on an old client finishes (or
+            // times out) before its client is disposed — never an ObjectDisposedException.
+            _ = Task.Delay(TimeSpan.FromSeconds(120)).ContinueWith(_ =>
             {
                 try { oldFaithful.Dispose(); oldFollow.Dispose(); } catch { /* best effort */ }
-            });
+            }, TaskScheduler.Default);
         }
     }
 
@@ -371,23 +375,34 @@ public sealed class UpstreamRelay : IDisposable
     }
 
     private string? ResolveHostIp(string host)
-        => _hostIpCache.GetOrAdd(host, static h =>
+    {
+        // Only successful lookups are cached: caching a null would let one transient DNS
+        // failure blank a host's IP for the whole process lifetime.
+        if (_hostIpCache.TryGetValue(host, out var cached))
         {
-            if (IPAddress.TryParse(h, out var literal))
-            {
-                return literal.ToString();
-            }
+            return cached;
+        }
 
-            try
+        if (IPAddress.TryParse(host, out var literal))
+        {
+            return _hostIpCache[host] = literal.ToString();
+        }
+
+        try
+        {
+            var addrs = Dns.GetHostAddresses(host);
+            if (addrs.Length > 0)
             {
-                var addrs = Dns.GetHostAddresses(h);
-                return addrs.Length > 0 ? addrs[0].ToString() : null;
+                return _hostIpCache[host] = addrs[0].ToString();
             }
-            catch (Exception)
-            {
-                return null;
-            }
-        });
+        }
+        catch (Exception)
+        {
+            // Transient/unresolvable — leave it uncached so a later request retries.
+        }
+
+        return null;
+    }
 
     private byte[] Cap(byte[] body, out bool truncated)
     {

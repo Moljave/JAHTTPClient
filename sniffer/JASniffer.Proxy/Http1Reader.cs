@@ -13,6 +13,10 @@ internal sealed class Http1Reader(Stream stream)
 {
     private const int MaxHeaderBytes = 256 * 1024;
 
+    // Hard ceiling on a single de-chunked body so a malformed/hostile chunk size can't
+    // drive an unbounded allocation (the Content-Length path is bounded by its header).
+    private const long MaxChunkedBodyBytes = 256L * 1024 * 1024;
+
     private byte[] _buf = new byte[16 * 1024];
     private int _pos;
     private int _len;
@@ -73,6 +77,7 @@ internal sealed class Http1Reader(Stream stream)
     public async Task<byte[]> ReadChunkedAsync(CancellationToken ct)
     {
         using var body = new MemoryStream();
+        long total = 0;
         while (true)
         {
             var sizeLine = await ReadLineAsync(ct).ConfigureAwait(false);
@@ -85,6 +90,13 @@ internal sealed class Http1Reader(Stream stream)
             if (!int.TryParse(sizeLine.Trim(), System.Globalization.NumberStyles.HexNumber, null, out var size) || size < 0)
             {
                 throw new InvalidDataException($"Malformed chunk size: '{sizeLine}'.");
+            }
+
+            total += size;
+            if (total > MaxChunkedBodyBytes)
+            {
+                // Reject before allocating the chunk, so a 2 GB chunk size can't OOM us.
+                throw new InvalidDataException("Chunked body exceeds the maximum allowed size.");
             }
 
             if (size == 0)

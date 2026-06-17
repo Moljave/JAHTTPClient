@@ -60,6 +60,17 @@ public static class ProxyUrl
                 return null;
             }
         }
+        else if (s.StartsWith('['))
+        {
+            // IPv6 literal in the no-credentials form: [::1]:8080
+            var end = s.IndexOf(']');
+            if (end <= 1 || end + 2 >= s.Length || s[end + 1] != ':' || !int.TryParse(s[(end + 2)..], out port))
+            {
+                return null;
+            }
+
+            host = s[..(end + 1)]; // keep the brackets for the URL authority
+        }
         else
         {
             // host:port  OR  host:port:user:pass(:more-of-pass)

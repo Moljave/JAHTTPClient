@@ -9,9 +9,9 @@ namespace JASniffer.Proxy.Udp;
 /// <summary>
 /// One-click installer for the WinDivert runtime (the driver + user-mode DLL the
 /// UDP capture needs). It downloads the official, immutable WinDivert 2.2.2-A
-/// archive over HTTPS from the author's site, verifies a pinned SHA-256, extracts
-/// the right files for the process architecture next to the app, and (on Windows)
-/// confirms the binaries are Authenticode-signed before they are used.
+/// archive over HTTPS from the author's site, verifies a pinned SHA-256 of the whole
+/// archive (the integrity guarantee), and extracts the right files for the process
+/// architecture next to the app.
 /// </summary>
 /// <remarks>
 /// Loading the kernel driver still requires running JASniffer as Administrator;

@@ -65,9 +65,11 @@ internal sealed class ProxyConnection(
                 return;
             }
 
-            if (request.IsUpgrade)
+            if (request.IsUpgrade || request.IsEventStream)
             {
-                // ws:// upgrade: hand the whole conversation to a raw TCP tunnel.
+                // ws:// upgrade or text/event-stream (SSE): both are long-lived/streaming
+                // and can't be buffered, so hand the whole conversation to a raw TCP tunnel
+                // (mirrors the HTTPS path in PumpMitmAsync).
                 await TunnelPlainAsync(stream, reader, request, ct).ConfigureAwait(false);
                 return;
             }
@@ -115,10 +117,9 @@ internal sealed class ProxyConnection(
             return;
         }
 
-        SslStream tls;
+        var tls = new SslStream(new PrefixedStream(reader.DrainBuffered(), stream), leaveInnerStreamOpen: false);
         try
         {
-            tls = new SslStream(new PrefixedStream(reader.DrainBuffered(), stream), leaveInnerStreamOpen: false);
             await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
             {
                 ServerCertificate = ca.GetServerCertificate(host),
@@ -130,7 +131,9 @@ internal sealed class ProxyConnection(
         catch (Exception ex)
         {
             // The browser aborted the TLS handshake (often because it raced to HTTP/3,
-            // or pins this host). Record it so the host is visible, then drop the conn.
+            // or pins this host). Dispose the half-open stream, record it so the host is
+            // visible, then drop the conn.
+            await tls.DisposeAsync().ConfigureAwait(false);
             logger.LogDebug(ex, "TLS handshake with the browser failed for {Host}", host);
             RecordConnectFailure(host, port, ex.InnerException?.Message ?? ex.Message);
             return;

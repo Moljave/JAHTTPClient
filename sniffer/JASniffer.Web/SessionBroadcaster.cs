@@ -46,8 +46,10 @@ public sealed class SessionBroadcaster : BackgroundService
                 var cleared = false;
 
                 // Drain everything currently queued, collapsing repeated updates of
-                // the same session to its latest summary.
-                while (reader.TryRead(out var signal) && pending.Count < MaxBatch)
+                // the same session to its latest summary. Check the cap BEFORE reading so
+                // a signal is never consumed-then-dropped when the batch is full — any
+                // overflow stays queued for the next cycle.
+                while (pending.Count < MaxBatch && reader.TryRead(out var signal))
                 {
                     switch (signal.Kind)
                     {
