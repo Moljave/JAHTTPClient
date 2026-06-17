@@ -3,29 +3,27 @@ bin/
 obj/
 *.user
 
-# Native build artifacts
-native/*.h
-native/*.so
-native/*.dll
-native/*.dylib
+# Native build artifacts (Go cffi wrapper lives in client/native)
+client/native/*.h
+client/native/*.so
+client/native/*.dll
+client/native/*.dylib
+client/native/go.sum
 
 # The compiled native libraries are produced locally and dropped here.
 # Track the folder layout but not the (large, platform-specific) binaries.
-src/JAHTTPClient/runtimes/**/*.dll
-src/JAHTTPClient/runtimes/**/*.so
-src/JAHTTPClient/runtimes/**/*.dylib
-src/JAHTTPClient/runtimes/**/*.h
+client/JAHTTPClient/runtimes/**/*.dll
+client/JAHTTPClient/runtimes/**/*.so
+client/JAHTTPClient/runtimes/**/*.dylib
+client/JAHTTPClient/runtimes/**/*.h
 
 # Exception: the prebuilt linux-x64 native library is committed on purpose so the
 # library runs out of the box on linux-x64 without a local Go/CGO build.
-!src/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
+!client/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
 
 # Exception: the cross-built win-x64 native engine is committed too, so a Windows
 # exe can be produced with `dotnet publish -r win-x64` without a local Go/mingw build.
-!src/JAHTTPClient/runtimes/win-x64/native/tls-client-windows-64.dll
-
-# Go
-native/go.sum
+!client/JAHTTPClient/runtimes/win-x64/native/tls-client-windows-64.dll
 
 # IDE
 .vs/
@@ -38,9 +36,8 @@ native/go.sum
 /*.saz
 /Project.zip
 
-# Publish output (regenerable: produced by `dotnet publish`). The unpacked
-# folders are huge; keep them out of git. The packaged JASniffer-win-x64.zip
-# (ready-to-run exe + native dll) IS committed below as a release artifact.
+# Publish output and packaged builds (regenerable via `dotnet publish`; large).
 /dist-win/
 /dist-linux/
 /JASniffer-win-x64/
+/JASniffer-win-x64.zip

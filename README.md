@@ -44,27 +44,27 @@ HttpRequestMessage → JSON → native request() (utls) → JSON → HttpRespons
 **Windows** (основная платформа; нужен gcc — tdm-gcc или mingw-w64):
 
 ```powershell
-cd native
+cd client/native
 ./build-windows.ps1
-# → src/JAHTTPClient/runtimes/win-x64/native/tls-client-windows-64.dll
+# → client/JAHTTPClient/runtimes/win-x64/native/tls-client-windows-64.dll
 ```
 
 **Linux** (нужен gcc):
 
 ```bash
-cd native
+cd client/native
 make linux
-# → src/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
+# → client/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
 ```
 
-> Бинарь не коммитится в репозиторий (см. `.gitignore`) — он большой и
-> платформозависимый. `dotnet build` копирует его рядом со сборкой автоматически.
+> Готовые бинарники для **linux-x64** и **win-x64** уже закоммичены (исключения в
+> `.gitignore`), так что проект работает «из коробки». `dotnet build` копирует нужный
+> рядом со сборкой автоматически; пересобрать можно скриптами выше.
 
 ### 2. Решение
 
 ```bash
-dotnet build -c Release
-dotnet run -c Release --project samples/JAHTTPClient.Sample
+dotnet build -c Release JAHTTPClient.sln
 ```
 
 ## Использование
@@ -86,8 +86,7 @@ var body = await response.Content.ReadAsStringAsync();
 
 API намеренно повторяет `HttpClient` (`HttpRequestMessage`,
 `HttpResponseMessage`, `CancellationToken`), поэтому существующий
-`ExecuteShortWEBRequestAsync` переносится почти без изменений — см.
-`samples/JAHTTPClient.Sample/Program.cs`.
+`ExecuteShortWEBRequestAsync` переносится почти без изменений (пример — фрагмент выше).
 
 ### Семантика `MaxAutomaticRedirections`
 
@@ -202,14 +201,16 @@ var current = client.Proxy;                          // текущий прок�
 ## Структура
 
 ```
-native/                       Go cffi-обёртка + скрипты сборки
-src/JAHTTPClient/
-  Native/                     P/Invoke ([LibraryImport]) + resolver по RID
-  Interop/                    JSON DTO (System.Text.Json source-gen)
-  Fingerprinting/             Ja3Preset + профили (Chrome 148 = chrome_133 + UA 148)
-  Cookies/                    ChromeCookieContainer
-  ChromeHttpClient*.cs        абстракция + реализация
-samples/JAHTTPClient.Sample/  пример + миграция ExecuteShortWEBRequestAsync
+client/                       исходник клиента
+  native/                     Go cffi-обёртка + скрипты сборки (.so/.dll)
+  JAHTTPClient/
+    Native/                   P/Invoke ([LibraryImport]) + resolver по RID
+    Interop/                  JSON DTO (System.Text.Json source-gen)
+    Fingerprinting/           Ja3Preset + профили (Chrome 148 = chrome_133 + UA 148)
+    Cookies/                  ChromeCookieContainer
+    ChromeHttpClient*.cs      абстракция + реализация
+    runtimes/<rid>/native/    готовые бинарники движка (linux-x64, win-x64)
+sniffer/                      снифер JASniffer (Core / Proxy / Web / Tests)
 ```
 
 ## Обновление под новый Chrome

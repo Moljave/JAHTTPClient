@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/JAHTTPClient/JAHTTPClient.csproj" />
+    <ProjectReference Include="../../client/JAHTTPClient/JAHTTPClient.csproj" />
     <ProjectReference Include="../JASniffer.Core/JASniffer.Core.csproj" />
   </ItemGroup>
 

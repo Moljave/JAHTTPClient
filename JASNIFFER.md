@@ -32,23 +32,23 @@ ClientHello и палится anti‑bot системами (Akamai, Cloudflare)
 ### 1. Нативная библиотека `tls-client`
 
 `JAHTTPClient` работает поверх нативной библиотеки utls (см. корневой
-[`README.md`](README.md) и каталог [`native/`](native/)). Соберите её один раз —
+[`README.md`](README.md) и каталог [`client/native/`](client/native/)). Соберите её один раз —
 `dotnet build` сам скопирует бинарь рядом со сборкой:
 
 ```bash
 # Linux (нужен gcc):
-cd native && make linux
-#   → src/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
+cd client/native && make linux
+#   → client/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
 
 # Windows (нужен mingw‑w64 / tdm‑gcc):
-cd native ; ./build-windows.ps1
-#   → src/JAHTTPClient/runtimes/win-x64/native/tls-client-windows-64.dll
+cd client/native ; ./build-windows.ps1
+#   → client/JAHTTPClient/runtimes/win-x64/native/tls-client-windows-64.dll
 ```
 
 ### 2. Запуск
 
 Снифер — **отдельное решение** `JASniffer.sln` (исходники в каталоге `sniffer/`),
-которое ссылается на движок `src/JAHTTPClient`. Сборка/запуск:
+которое ссылается на движок `client/JAHTTPClient`. Сборка/запуск:
 
 ```bash
 dotnet build -c Release JASniffer.sln                       # при желании собрать всё решение
@@ -216,7 +216,7 @@ UDP не расшифровывается и не ретранслируется
 
 | Файл | Назначение | Где взять |
 |---|---|---|
-| `runtimes\win-x64\native\tls-client-windows-64.dll` | движок Chrome‑JA3 (обязателен) | `native\build-windows.ps1`; либо положить в `src\JAHTTPClient\runtimes\win-x64\native\` — `dotnet build` скопирует |
+| `runtimes\win-x64\native\tls-client-windows-64.dll` | движок Chrome‑JA3 (обязателен) | `client\native\build-windows.ps1`; либо положить в `client\JAHTTPClient\runtimes\win-x64\native\` — `dotnet build` скопирует |
 | `WinDivert.dll`, `WinDivert64.sys` | UDP‑захват (опционально) | релиз WinDivert |
 
 Managed `JAHTTPClient.dll` копировать вручную не нужно — он собирается по
@@ -379,12 +379,12 @@ TCP/TLS‑туннелем: браузер продолжает работать
 ## Структура решения
 
 Снифер вынесен в отдельный каталог `sniffer/` и собственное решение
-`JASniffer.sln`; движок `src/JAHTTPClient` подключается по `ProjectReference` и
+`JASniffer.sln`; движок `client/JAHTTPClient` подключается по `ProjectReference` и
 остаётся частью своего `JAHTTPClient.sln`.
 
 ```
 JASniffer.sln            отдельное решение снифера (4 проекта + движок JAHTTPClient)
-src/JAHTTPClient/        существующий движок (Chrome JA3). Минимальное добавление: опция WithoutCookieJar.
+client/JAHTTPClient/        существующий движок (Chrome JA3). Минимальное добавление: опция WithoutCookieJar.
 sniffer/JASniffer.Core/  модели сессий, SessionStore, генерация/кэш сертификатов (CertificateAuthority),
                          разбор (params/cookies/auth), экспорт .saz (SazExporter), настройки.
 sniffer/JASniffer.Proxy/ TcpListener :8866, разбор HTTP/CONNECT (Http1Reader/Http1Request),
