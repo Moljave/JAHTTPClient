@@ -17,6 +17,8 @@
     methods: new Set(),
     types: new Set(),
     follow: true,
+    autoBypassCloudflare: true,
+    cfFlashed: new Set(),   // hosts we've already toasted a CF-challenge hint for
     // Resender
     rsDetail: null,        // last response detail shown in the Resender
     rsResTab: "headers",
@@ -108,6 +110,14 @@
     if (s.method && !state.methods.has(s.method)) { state.methods.add(s.method); addOption(el.filterMethod, s.method); }
     const t = shortType(s.responseContentType);
     if (t && !state.types.has(t)) { state.types.add(t); addOption(el.filterType, t); }
+  }
+
+  // First time we see a Cloudflare challenge on a host (auto-bypass on), nudge the user
+  // to reload — the host now tunnels directly so the browser can solve the captcha itself.
+  function maybeFlashCf(s) {
+    if (!s || !s.cfChallenge || !state.autoBypassCloudflare || state.cfFlashed.has(s.host)) return;
+    state.cfFlashed.add(s.host);
+    flash("Cloudflare-челлендж: " + s.host + " → прямой туннель, перезагрузите вкладку");
   }
 
   function addOption(select, value) {
@@ -255,12 +265,12 @@
       : s.error
         ? `<span class="badge b-red">ERROR</span>`
         : `<span class="badge ${badgeColor(s.status)}">${s.status} ${escapeHtml(s.reason || "")}</span>`;
-    const cf = d && d.responseHeaders && d.responseHeaders.some((h) => h.name.toLowerCase() === "cf-mitigated");
+    const cf = s.cfChallenge || (d && d.responseHeaders && d.responseHeaders.some((h) => h.name.toLowerCase() === "cf-mitigated"));
     return statusBadge +
       (s.wasTunneled ? "" : `<span class="badge b-muted">${httpLabel(s.responseHttpVersion)}</span>`) +
       (s.wasTunneled ? "" : `<span class="badge b-muted">BODY: ${formatBytes(s.bodyLength)}</span>`) +
       (s.completed && !s.wasTunneled ? `<span class="badge b-muted">${Math.round(s.durationMs)} ms</span>` : "") +
-      (cf ? `<span class="badge b-orange" title="Cloudflare-челлендж. MITM-сниф такие сайты обычно не проходит (страница отдаётся браузеру по HTTP/1.1 + ре-фингерпринт). Добавьте хост в «Пропускать без расшифровки»: ПКМ по сессии → «Не расшифровывать этот хост».">CF challenge</span>` : "") +
+      (cf ? `<span class="badge b-orange" title="Cloudflare-челлендж (Turnstile / «проверяем браузер»). Через MITM он не проходит by design. При включённом «Авто-байпасе Cloudflare» хост уже переведён на прямой туннель — перезагрузите вкладку, капча решится напрямую. Иначе добавьте хост в «Пропускать без расшифровки» (ПКМ → «Не расшифровывать этот хост»).">CF challenge → bypass</span>` : "") +
       (d && d.tlsSummary ? `<span class="badge b-green" title="Производное от активного пресета; реальная версия TLS апстрима не раскрывается">${escapeHtml(d.tlsSummary)}</span>` : "") +
       (s.followedRedirects && s.finalUrl && s.finalUrl !== s.url ? `<span class="badge b-blue" title="${escapeHtml(s.finalUrl)}">→ редирект</span>` : "");
   }
@@ -476,6 +486,7 @@
     $("#tglInterceptAll").addEventListener("change", saveSettings);
     $("#tglInsecure").addEventListener("change", saveSettings);
     $("#txtBypass").addEventListener("change", saveSettings);
+    $("#tglAutoCf").addEventListener("change", saveSettings);
     $("#txtProxy").addEventListener("change", saveSettings);
     $("#tglRotating").addEventListener("change", saveSettings);
     $("#btnTestProxy").addEventListener("click", testProxy);
@@ -541,9 +552,10 @@
       interceptAllPorts: $("#tglInterceptAll").checked,
       ignoreUpstreamCertErrors: $("#tglInsecure").checked,
       bypassHosts: $("#txtBypass").value,
+      autoBypassCloudflare: $("#tglAutoCf").checked,
     };
     const res = await postJson("/api/settings", dto);
-    if (res) $("#txtProxy").value = res.upstreamProxy || ""; // show the canonicalized proxy
+    if (res) { $("#txtProxy").value = res.upstreamProxy || ""; state.autoBypassCloudflare = res.autoBypassCloudflare; } // show canonicalized proxy + track CF auto-bypass
     const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
     $("#presetLabel").textContent = label;
   }
@@ -920,7 +932,7 @@
 
   function connectHub() {
     const conn = new signalR.HubConnectionBuilder().withUrl("/hub/sessions").withAutomaticReconnect().build();
-    conn.on("sessions", (batch) => { for (const s of batch) upsert(s); scheduleRender(); });
+    conn.on("sessions", (batch) => { for (const s of batch) { upsert(s); maybeFlashCf(s); } scheduleRender(); });
     conn.on("removed", (ids) => { for (const id of ids) removeLocal(id); });
     conn.on("cleared", () => {
       state.sessions.clear(); state.ids = []; state.filtered = []; state.selectedId = null; state.detail = null;
@@ -977,6 +989,8 @@
       $("#tglInterceptAll").checked = s.interceptAllPorts;
       $("#tglInsecure").checked = s.ignoreUpstreamCertErrors;
       $("#txtBypass").value = s.bypassHosts || "";
+      $("#tglAutoCf").checked = s.autoBypassCloudflare;
+      state.autoBypassCloudflare = s.autoBypassCloudflare;
       $("#txtProxy").value = s.upstreamProxy || "";
       $("#tglRotating").checked = s.rotatingProxy;
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;

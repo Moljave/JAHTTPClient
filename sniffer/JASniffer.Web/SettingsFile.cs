@@ -39,6 +39,7 @@ public static class SettingsFile
             settings.InterceptAllPorts = saved.InterceptAllPorts;
             settings.IgnoreUpstreamCertErrors = saved.IgnoreUpstreamCertErrors;
             settings.BypassHosts = saved.BypassHosts ?? string.Empty;
+            settings.AutoBypassCloudflare = saved.AutoBypassCloudflare;
         }
         catch (Exception)
         {
@@ -56,7 +57,7 @@ public static class SettingsFile
                 settings.SmartRedirects, settings.MaxRedirects, settings.Capture,
                 settings.UpstreamProxy, settings.FingerprintPreset, settings.ForceHttp1,
                 settings.InterceptAllPorts, settings.IgnoreUpstreamCertErrors, settings.BypassHosts,
-                settings.RotatingProxy);
+                settings.RotatingProxy, settings.AutoBypassCloudflare);
             File.WriteAllText(path, JsonSerializer.Serialize(dto, Options));
         }
         catch (Exception)
@@ -67,5 +68,6 @@ public static class SettingsFile
 
     private sealed record Persisted(
         bool SmartRedirects, int MaxRedirects, bool Capture, string? UpstreamProxy, string FingerprintPreset, bool ForceHttp1,
-        bool InterceptAllPorts = true, bool IgnoreUpstreamCertErrors = false, string? BypassHosts = null, bool RotatingProxy = false);
+        bool InterceptAllPorts = true, bool IgnoreUpstreamCertErrors = false, string? BypassHosts = null, bool RotatingProxy = false,
+        bool AutoBypassCloudflare = true);
 }

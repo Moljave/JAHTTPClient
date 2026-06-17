@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace JASniffer.Core;
 
 /// <summary>
@@ -16,7 +18,14 @@ public sealed class SnifferSettings
     private volatile bool _interceptAllPorts = true;
     private volatile bool _ignoreUpstreamCertErrors;
     private volatile bool _rotatingProxy;
+    private volatile bool _autoBypassCloudflare = true;
     private volatile string[] _bypassHosts = [];
+
+    // Hosts auto-tunneled at runtime after a detected Cloudflare challenge. Kept in
+    // memory only (never persisted), so a transient challenge never permanently stops
+    // inspecting a host across restarts.
+    private readonly ConcurrentDictionary<string, byte> _autoBypassHosts = new(StringComparer.OrdinalIgnoreCase);
+
 
     /// <summary>
     /// When false (default, most faithful), the browser receives raw 3xx responses
@@ -96,17 +105,17 @@ public sealed class SnifferSettings
             .ToArray();
     }
 
-    /// <summary>True when <paramref name="host"/> should be tunneled un-decrypted (exact or a subdomain).</summary>
+    /// <summary>
+    /// True when <paramref name="host"/> should be tunneled un-decrypted — either because
+    /// the user listed it (<see cref="BypassHosts"/>) or because a Cloudflare challenge was
+    /// auto-detected on it (<see cref="AutoBypassCloudflare"/>). Matches the host exactly or
+    /// any subdomain of it.
+    /// </summary>
     public bool IsBypassed(string host)
     {
-        var patterns = _bypassHosts;
-        if (patterns.Length == 0)
-        {
-            return false;
-        }
-
         host = host.ToLowerInvariant();
-        foreach (var p in patterns)
+
+        foreach (var p in _bypassHosts)
         {
             if (host == p || host.EndsWith("." + p, StringComparison.Ordinal))
             {
@@ -114,8 +123,53 @@ public sealed class SnifferSettings
             }
         }
 
+        if (_autoBypassCloudflare && !_autoBypassHosts.IsEmpty)
+        {
+            foreach (var p in _autoBypassHosts.Keys)
+            {
+                if (host == p || host.EndsWith("." + p, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
+
+    /// <summary>
+    /// When true (default), a host is automatically routed through a raw tunnel (no MITM)
+    /// the first time a Cloudflare challenge is detected on it, so the browser solves the
+    /// challenge directly with its own real TLS/HTTP-2/3. This is the only reliable way past
+    /// an active Cloudflare/Turnstile challenge — a re-fingerprinting MITM cannot pass one
+    /// (the page reaches the browser over HTTP/1.1 and the JA3/H2/timing signals desync).
+    /// </summary>
+    public bool AutoBypassCloudflare
+    {
+        get => _autoBypassCloudflare;
+        set => _autoBypassCloudflare = value;
+    }
+
+    /// <summary>
+    /// Registers <paramref name="host"/> for automatic, in-memory bypass (no MITM). Used when
+    /// a Cloudflare challenge is detected. Not persisted, so it is forgotten on restart.
+    /// Returns true if the host was newly added.
+    /// </summary>
+    public bool AddAutoBypass(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        return _autoBypassHosts.TryAdd(host.Trim().ToLowerInvariant(), 0);
+    }
+
+    /// <summary>Clears the runtime Cloudflare auto-bypass set (e.g. to re-attempt inspection).</summary>
+    public void ClearAutoBypass() => _autoBypassHosts.Clear();
+
+    /// <summary>Number of hosts currently auto-bypassed at runtime.</summary>
+    public int AutoBypassedCount => _autoBypassHosts.Count;
 
     /// <summary>
     /// Intercept (MITM) HTTPS on every CONNECT port, not just 443/8443 — needed to

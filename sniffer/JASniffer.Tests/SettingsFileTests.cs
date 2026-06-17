@@ -27,6 +27,7 @@ public sealed class SettingsFileTests : IDisposable
             InterceptAllPorts = false,
             IgnoreUpstreamCertErrors = true,
             BypassHosts = "a.com, b.com",
+            AutoBypassCloudflare = false,
         };
         SettingsFile.Save(saved, _path);
 
@@ -43,6 +44,17 @@ public sealed class SettingsFileTests : IDisposable
         Assert.False(loaded.InterceptAllPorts);
         Assert.True(loaded.IgnoreUpstreamCertErrors);
         Assert.Equal(new[] { "a.com", "b.com" }, loaded.BypassHosts.Split('\n'));
+        Assert.False(loaded.AutoBypassCloudflare);
+    }
+
+    [Fact]
+    public void Apply_FileWithoutAutoBypassField_DefaultsToTrue()
+    {
+        // Settings files written before the toggle existed must keep the safe default (on).
+        File.WriteAllText(_path, "{\"smartRedirects\":false,\"maxRedirects\":10,\"capture\":true,\"fingerprintPreset\":\"Chrome\",\"forceHttp1\":false}");
+        var settings = new SnifferSettings { AutoBypassCloudflare = false };
+        SettingsFile.Apply(settings, _path);
+        Assert.True(settings.AutoBypassCloudflare);
     }
 
     [Fact]

@@ -172,6 +172,8 @@
           <div class="setting-label">Пропускать без расшифровки (хосты)</div>
           <textarea id="txtBypass" class="cmp-area" rows="3" spellcheck="false" placeholder="cdn.ls.app&#10;example.com"></textarea>
           <div class="setting-note">По строке/через запятую. Эти хосты идут сырым туннелем (без MITM) — для сайтов с pinning или тех, что ломаются при перехвате. Хост охватывает и поддомены (<code>ls.app</code> → <code>cdn.ls.app</code>). В списке видны как «tunnel».</div>
+          <label class="toggle" title="При обнаружении Cloudflare-челленджа (Turnstile / «проверяем браузер») хост автоматически переводится на прямой туннель — браузер решает капчу сам своим настоящим TLS/h2/h3. Достаточно перезагрузить страницу. Это единственный надёжный способ пройти активный CF-челлендж (через MITM он не проходит)."><input type="checkbox" id="tglAutoCf" checked /> <span>Авто-байпас Cloudflare-челленджа (решать капчу напрямую)</span></label>
+          <div class="setting-note">Снифер сам ловит CF-челлендж по заголовку <code>cf-mitigated</code> и помечает сессию бейджем «CF challenge». При включённом тумблере хост далее идёт сырым туннелем — перезагрузите вкладку, капча решится. Авто-список держится в памяти и сбрасывается при перезапуске.</div>
         </div>
 
         <div class="setting">

@@ -83,6 +83,7 @@ api.MapPost("/settings", (SettingsDto dto, SnifferSettings s, UpstreamRelay rela
     s.InterceptAllPorts = dto.InterceptAllPorts;
     s.IgnoreUpstreamCertErrors = dto.IgnoreUpstreamCertErrors;
     s.BypassHosts = dto.BypassHosts ?? string.Empty;
+    s.AutoBypassCloudflare = dto.AutoBypassCloudflare;
     relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1, s.IgnoreUpstreamCertErrors); // rebuilds clients only if these changed
     relay.ApplyProxy(s.UpstreamProxy, s.RotatingProxy); // hot-swap the egress proxy
     SettingsFile.Save(s, settingsPath);
@@ -244,7 +245,7 @@ static IResult ServeBody(byte[] body, string? contentType, string name, bool dow
 
 static SettingsDto Settings(SnifferSettings s) =>
     new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.RotatingProxy, s.FingerprintPreset, s.ForceHttp1,
-        s.InterceptAllPorts, s.IgnoreUpstreamCertErrors, s.BypassHosts);
+        s.InterceptAllPorts, s.IgnoreUpstreamCertErrors, s.BypassHosts, s.AutoBypassCloudflare);
 
 // Parses a "Name: Value" per-line header block (as typed in the Requester) into
 // ordered header entries.

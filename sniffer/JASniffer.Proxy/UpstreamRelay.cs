@@ -250,6 +250,18 @@ public sealed class UpstreamRelay : IDisposable
         var contentType = HttpParsing.FirstHeader(responseHeaders, "Content-Type");
         var httpVersion = response.Version.Major >= 2 ? "2.0" : "1.1";
 
+        // A Cloudflare challenge can't be solved through a re-fingerprinting MITM. Detect it
+        // and (when enabled) route the host through a raw tunnel from now on, so the browser
+        // solves the challenge directly with its own TLS/HTTP-2/3 on the next load.
+        if (IsCloudflareChallenge(responseHeaders, (int)response.StatusCode, body, contentType))
+        {
+            session.CfChallenge = true;
+            if (_settings.AutoBypassCloudflare)
+            {
+                _settings.AddAutoBypass(request.Host);
+            }
+        }
+
         session.DurationMs = elapsedMs;
         session.Completed = true;
         session.UpstreamOk = true;
@@ -429,6 +441,41 @@ public sealed class UpstreamRelay : IDisposable
 
     private static bool IsContentHeader(string name)
         => name.StartsWith("Content-", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Heuristically detects a Cloudflare challenge response: the managed/Turnstile case sets
+    /// the <c>cf-mitigated: challenge</c> header; the interstitial ("Just a moment…") is a
+    /// 403/503 from Cloudflare (<c>cf-ray</c>) whose HTML loads the challenge-platform script.
+    /// </summary>
+    private static bool IsCloudflareChallenge(List<HeaderEntry> headers, int status, byte[] body, string? contentType)
+    {
+        foreach (var h in headers)
+        {
+            if (h.Name.Equals("cf-mitigated", StringComparison.OrdinalIgnoreCase)
+                && h.Value.Contains("challenge", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return status is 403 or 503
+            && HttpParsing.FirstHeader(headers, "cf-ray") is not null
+            && (contentType is null || contentType.Contains("html", StringComparison.OrdinalIgnoreCase))
+            && BodyContainsAscii(body, "/cdn-cgi/challenge-platform/");
+    }
+
+    // Cheap ASCII substring scan over the first 64 KB of a body (the challenge marker, if
+    // present, is in the document head).
+    private static bool BodyContainsAscii(byte[] body, string marker)
+    {
+        if (body.Length == 0)
+        {
+            return false;
+        }
+
+        var len = Math.Min(body.Length, 64 * 1024);
+        return System.Text.Encoding.Latin1.GetString(body, 0, len).Contains(marker, StringComparison.OrdinalIgnoreCase);
+    }
 
     public void Dispose()
     {

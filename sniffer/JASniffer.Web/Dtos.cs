@@ -32,7 +32,8 @@ public sealed record SessionSummaryDto(
     string FingerprintPreset,
     long TunnelBytesUp,
     long TunnelBytesDown,
-    bool IsUdp);
+    bool IsUdp,
+    bool CfChallenge);
 
 public sealed record HeaderDto(string Name, string Value);
 
@@ -64,7 +65,8 @@ public sealed record SettingsDto(
     bool ForceHttp1,
     bool InterceptAllPorts,
     bool IgnoreUpstreamCertErrors,
-    string? BypassHosts);
+    string? BypassHosts,
+    bool AutoBypassCloudflare);
 
 /// <summary>One-shot status the UI shows in the header / CA panel.</summary>
 public sealed record StatusDto(
@@ -111,7 +113,8 @@ public static class DtoMapper
         s.FingerprintPreset,
         s.TunnelBytesUp,
         s.TunnelBytesDown,
-        s.IsUdp);
+        s.IsUdp,
+        s.CfChallenge);
 
     public static SessionDetailDto ToDetail(CapturedSession s) => new(
         ToSummary(s),

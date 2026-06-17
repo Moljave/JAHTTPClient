@@ -76,4 +76,63 @@ public class SnifferSettingsTests
         var s = new SnifferSettings { UpstreamProxy = "1.2.3.4:8080:user:pass" };
         Assert.Equal("http://user:pass@1.2.3.4:8080", s.UpstreamProxy);
     }
+
+    // ---- Cloudflare auto-bypass ---------------------------------------------
+
+    [Fact]
+    public void AutoBypass_TunnelsHostAndSubdomains_WhenEnabled()
+    {
+        var s = new SnifferSettings { AutoBypassCloudflare = true };
+        Assert.False(s.IsBypassed("shop.example"));
+        Assert.True(s.AddAutoBypass("shop.example"));
+        Assert.True(s.IsBypassed("shop.example"));
+        Assert.True(s.IsBypassed("www.shop.example")); // subdomain covered
+        Assert.Equal(1, s.AutoBypassedCount);
+    }
+
+    [Fact]
+    public void AddAutoBypass_IsIdempotentCaseInsensitive()
+    {
+        var s = new SnifferSettings();
+        Assert.True(s.AddAutoBypass("a.com"));
+        Assert.False(s.AddAutoBypass("A.COM")); // already present
+        Assert.Equal(1, s.AutoBypassedCount);
+    }
+
+    [Fact]
+    public void AutoBypass_ToggleOff_DoesNotTunnel_ButRetainsSet()
+    {
+        var s = new SnifferSettings { AutoBypassCloudflare = false };
+        s.AddAutoBypass("blocked.example");
+        Assert.False(s.IsBypassed("blocked.example")); // toggle off → ignored
+        s.AutoBypassCloudflare = true;
+        Assert.True(s.IsBypassed("blocked.example"));  // re-enabling honors the set
+    }
+
+    [Fact]
+    public void ClearAutoBypass_Empties()
+    {
+        var s = new SnifferSettings();
+        s.AddAutoBypass("x.com");
+        s.ClearAutoBypass();
+        Assert.Equal(0, s.AutoBypassedCount);
+        Assert.False(s.IsBypassed("x.com"));
+    }
+
+    [Fact]
+    public void AutoBypass_IsSeparateFromUserBypassList()
+    {
+        var s = new SnifferSettings { BypassHosts = "manual.example" };
+        Assert.True(s.IsBypassed("manual.example")); // user list unaffected
+        Assert.False(s.IsBypassed("auto.example"));
+        Assert.Equal(0, s.AutoBypassedCount);
+    }
+
+    [Fact]
+    public void AddAutoBypass_BlankHost_Ignored()
+    {
+        var s = new SnifferSettings();
+        Assert.False(s.AddAutoBypass("  "));
+        Assert.Equal(0, s.AutoBypassedCount);
+    }
 }

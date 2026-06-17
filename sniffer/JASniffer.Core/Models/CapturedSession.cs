@@ -85,6 +85,13 @@ public sealed class CapturedSession
     /// <summary><c>true</c> only when the upstream handshake/exchange completed without a transport error.</summary>
     public bool UpstreamOk { get; set; }
 
+    /// <summary>
+    /// <c>true</c> when the upstream response is a Cloudflare challenge (managed/Turnstile
+    /// interstitial). With <see cref="SnifferSettings.AutoBypassCloudflare"/> on, the host is
+    /// then auto-tunneled so the browser can solve it directly on reload.
+    /// </summary>
+    public bool CfChallenge { get; set; }
+
     public string? ClientEndpoint { get; set; }
     public string? HostIp { get; set; }
 
