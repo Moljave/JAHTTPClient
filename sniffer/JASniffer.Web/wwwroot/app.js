@@ -468,6 +468,7 @@
     $("#hintClose").addEventListener("click", () => { $("#caHint").classList.add("hidden"); localStorage.setItem("ca-dismissed", "1"); });
 
     $("#tglRedirects").addEventListener("change", saveSettings);
+    $("#numMaxRedirects").addEventListener("change", saveSettings);
     $("#tglCapture").addEventListener("change", saveSettings);
     $("#modeManual").addEventListener("click", () => applyMode("manual"));
     $("#modeSystem").addEventListener("click", () => applyMode("system"));
@@ -531,6 +532,8 @@
   }
 
   async function saveSettings() {
+    const mr = parseInt($("#numMaxRedirects").value, 10);
+    if (Number.isFinite(mr) && mr >= 1 && mr <= 50) state.maxRedirects = mr;
     const dto = {
       smartRedirects: $("#tglRedirects").checked,
       maxRedirects: state.maxRedirects || 10,
@@ -981,6 +984,7 @@
       $("#txtProxy").value = s.upstreamProxy || "";
       $("#tglRotating").checked = s.rotatingProxy;
       state.maxRedirects = s.maxRedirects > 0 ? s.maxRedirects : 10;
+      $("#numMaxRedirects").value = state.maxRedirects;
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
       const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
       if (label) $("#presetLabel").textContent = label;

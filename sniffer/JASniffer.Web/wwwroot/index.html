@@ -153,6 +153,7 @@
             <label class="toggle" title="Не проверять сертификат апстрим‑сервера — для локальных dev‑серверов с самоподписанными сертификатами"><input type="checkbox" id="tglInsecure" /> <span>Игнорировать ошибки сертификата апстрима</span></label>
             <label class="toggle" title="Принудительно HTTP/1.1 вместо согласования HTTP/2"><input type="checkbox" id="tglForceHttp1" /> <span>Принудительно HTTP/1.1</span></label>
             <label class="toggle" title="Проходить цепочку редиректов наверху и отдавать только финальный ответ"><input type="checkbox" id="tglRedirects" /> <span>Smart Redirects</span></label>
+            <label class="num-row" title="Сколько редиректов проходить наверху при включённом Smart Redirects (1–50)"><span>Макс. редиректов наверху</span><input type="number" id="numMaxRedirects" class="num-input" min="1" max="50" step="1" value="10" /></label>
             <label class="toggle" title="Записывать перехваченный трафик в список"><input type="checkbox" id="tglCapture" checked /> <span>Capture</span></label>
             <label class="toggle" title="Пассивный захват UDP (DNS/QUIC) через WinDivert — Windows, нужен админ"><input type="checkbox" id="tglUdp" /> <span>UDP (WinDivert)</span></label>
           </div>
