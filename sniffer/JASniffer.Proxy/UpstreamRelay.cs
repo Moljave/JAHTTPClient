@@ -22,8 +22,10 @@ namespace JASniffer.Proxy;
 /// <item><b>faithful</b> — redirects off, <b>cookie jar off</b>: the browser gets
 /// raw 3xx responses and follows them itself, each hop captured separately, and
 /// the upstream request carries exactly the browser's cookies (no contamination).</item>
-/// <item><b>follow</b> — redirects on, cookie jar on: the chain is walked upstream
-/// (the jar carries Set-Cookie across hops) and only the final response returns.</item>
+/// <item><b>follow</b> — redirects on, request-scoped cookies: the chain is walked
+/// upstream carrying Set-Cookie across hops in per-request managed state (the shared
+/// native jar is bypassed, so tabs/requests never cross-contaminate) and only the
+/// final response returns.</item>
 /// </list>
 /// </remarks>
 public sealed record ProxyTestResult(bool Ok, string? Ip = null, string? Proxy = null, string? Error = null);
@@ -124,7 +126,9 @@ public sealed class UpstreamRelay : IDisposable
             FingerprintPreset = preset,
             AllowAutoRedirect = true,
             MaxAutomaticRedirections = maxRedirects,
-            WithoutCookieJar = false,
+            // Carry Set-Cookie across the redirect chain in request-scoped state (native
+            // jar off) so this shared client never leaks cookies between tabs/requests.
+            IsolateRedirectCookies = true,
             ForceHttp1 = forceHttp1,
             InsecureSkipVerify = insecure,
             Timeout = TimeSpan.FromSeconds(100),

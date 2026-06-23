@@ -152,9 +152,24 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         var orderedHeaders = CollectHeaders(request);
         var (body, isByteBody) = await ReadBodyAsync(request, cancellationToken).ConfigureAwait(false);
 
+        // Request-scoped cookie carrying: when isolating, a fresh container walks the
+        // redirect chain so Set-Cookie is honored across hops without ever touching the
+        // shared native jar — a shared client can't contaminate one request/tab with
+        // another's cookies. Seeded from the caller's verbatim Cookie header.
+        var chainCookies = _options.IsolateRedirectCookies ? new CookieContainer() : null;
+        if (chainCookies is not null)
+        {
+            SeedChainCookies(chainCookies, currentUri, orderedHeaders);
+        }
+
         var redirects = 0;
         while (true)
         {
+            if (chainCookies is not null)
+            {
+                ApplyChainCookies(chainCookies, currentUri, orderedHeaders);
+            }
+
             var payload = BuildPayload(method, currentUri, orderedHeaders, body, isByteBody);
             var response = await ExecuteWithRetryAsync(payload, cancellationToken).ConfigureAwait(false);
 
@@ -162,6 +177,10 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             // export full metadata even though the native jar only reads back
             // name→value pairs.
             _cookies.CaptureResponseCookies(currentUri, response.Headers);
+            if (chainCookies is not null)
+            {
+                CaptureChainCookies(chainCookies, currentUri, response.Headers);
+            }
 
             var location = ExtractLocation(response);
             if (location is not null &&
@@ -209,8 +228,10 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             // A faithful sniffing proxy opts out of the jar so a shared client only
             // ever sends the cookies the caller put on the request (the browser's
             // verbatim Cookie header) and never cross-contaminates hosts/tabs.
-            WithDefaultCookieJar = !_options.WithoutCookieJar,
-            WithoutCookieJar = _options.WithoutCookieJar,
+            // Isolated-redirect mode likewise bypasses the native jar — it carries
+            // cookies across hops in request-scoped managed state instead.
+            WithDefaultCookieJar = !(_options.WithoutCookieJar || _options.IsolateRedirectCookies),
+            WithoutCookieJar = _options.WithoutCookieJar || _options.IsolateRedirectCookies,
             WithRandomTlsExtensionOrder = _options.EnableJa3Fingerprinting,
             ForceHttp1 = _options.ForceHttp1,
             TimeoutMilliseconds = (int)Math.Clamp(_options.Timeout.TotalMilliseconds, 1, int.MaxValue),
@@ -690,6 +711,87 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         catch
         {
             // Seeding is best-effort; never fail the first request because of it.
+        }
+    }
+
+    // ---- request-scoped redirect cookies (IsolateRedirectCookies) ----------
+
+    /// <summary>
+    /// Seeds the per-request container with the caller's verbatim <c>Cookie</c> header,
+    /// scoped to the initial host, then drops that header — every hop's Cookie header is
+    /// recomputed from the container instead (host/path scoped by the BCL).
+    /// </summary>
+    private static void SeedChainCookies(CookieContainer jar, Uri uri, Dictionary<string, string> headers)
+    {
+        if (headers.TryGetValue("cookie", out var cookieHeader) && !string.IsNullOrWhiteSpace(cookieHeader))
+        {
+            foreach (var pair in cookieHeader.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var eq = pair.IndexOf('=');
+                if (eq <= 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    jar.Add(uri, new Cookie(pair[..eq].Trim(), pair[(eq + 1)..].Trim()) { Path = "/" });
+                }
+                catch (Exception ex) when (ex is CookieException or ArgumentException)
+                {
+                    // Skip a cookie the BCL won't accept; the rest still carry.
+                }
+            }
+        }
+
+        headers.Remove("cookie");
+    }
+
+    /// <summary>Sets this hop's <c>Cookie</c> header from the container (empty → no header).</summary>
+    private static void ApplyChainCookies(CookieContainer jar, Uri uri, Dictionary<string, string> headers)
+    {
+        var header = jar.GetCookieHeader(uri);
+        if (string.IsNullOrEmpty(header))
+        {
+            headers.Remove("cookie");
+        }
+        else
+        {
+            headers["cookie"] = header;
+        }
+    }
+
+    /// <summary>Folds this hop's <c>Set-Cookie</c> response headers into the container.</summary>
+    private static void CaptureChainCookies(CookieContainer jar, Uri uri, IReadOnlyDictionary<string, List<string>>? headers)
+    {
+        if (headers is null)
+        {
+            return;
+        }
+
+        foreach (var (name, values) in headers)
+        {
+            if (!name.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var value in values)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    jar.SetCookies(uri, value);
+                }
+                catch (CookieException)
+                {
+                    // Malformed Set-Cookie — skip it (best-effort, like the export mirror).
+                }
+            }
         }
     }
 
