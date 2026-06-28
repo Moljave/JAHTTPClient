@@ -208,6 +208,13 @@ pre.raw { margin: 0; white-space: pre-wrap; word-break: break-word; font-family:
 .num-row { display: flex; align-items: center; gap: 8px; }
 .num-input { width: 72px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--text); }
 .num-input:focus { outline: none; border-color: var(--accent); }
+.fp-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.fp-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.fp-item code { color: var(--text); }
+.fp-item .fp-x { cursor: pointer; color: var(--red); border: none; background: none; font-size: 14px; line-height: 1; padding: 0 2px; }
+.fp-save { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.fp-name { flex: 1; min-width: 0; background: var(--bg-3); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--text); }
+.fp-name:focus { outline: none; border-color: var(--accent); }
 .row-buttons { display: flex; gap: 10px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { background: var(--accent-2); }

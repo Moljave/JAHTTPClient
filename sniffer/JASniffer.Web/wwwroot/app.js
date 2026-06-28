@@ -18,6 +18,8 @@
     types: new Set(),
     follow: true,
     maxRedirects: 10,      // restored from /settings; preserved across saves
+    fingerprints: [],      // captured fingerprints saved to the selection list
+    lastCapture: null,     // { ja3, ja3Md5 } from the most recent self-test
     // Resender
     rsDetail: null,        // last response detail shown in the Resender
     rsResTab: "headers",
@@ -484,6 +486,11 @@
     $("#tglRotating").addEventListener("change", saveSettings);
     $("#btnTestProxy").addEventListener("click", testProxy);
     $("#btnSelftest").addEventListener("click", runSelfTest);
+    $("#btnFpAdd").addEventListener("click", addFingerprint);
+    $("#fpList").addEventListener("click", (e) => {
+      const b = e.target.closest(".fp-x");
+      if (b) removeFingerprint(b.dataset.fp);
+    });
 
     $("#btnSettings").addEventListener("click", () => openModal("settingsModal"));
     $("#settingsClose").addEventListener("click", () => closeModal("settingsModal"));
@@ -568,6 +575,8 @@
   async function runSelfTest() {
     const out = $("#selftestOut");
     out.textContent = "Снимаю реальный ClientHello локально…";
+    $("#fpSave").classList.add("hidden");
+    state.lastCapture = null;
     try {
       const r = await api("/api/fingerprint-selftest");
       if (!r.ok) { out.textContent = "⚠ " + (r.error || "не удалось"); return; }
@@ -577,7 +586,60 @@
         `шифров ${r.cipherCount} · расширений ${r.extensionCount}<br>` +
         `JA3 = <b>${r.ja3Md5}</b><br><span class="muted" style="word-break:break-all">${escapeHtml(r.ja3)}</span>` +
         (real ? "" : "<br><span class=\"muted\">Похоже, исходящий TLS перехватывается прокси/инспектором — наружу уходит его отпечаток, не движка.</span>");
+      // Offer to save this capture into the selection list.
+      state.lastCapture = { ja3: r.ja3, ja3Md5: r.ja3Md5 };
+      $("#fpName").value = (r.preset || "").split(" · ")[0];
+      $("#fpSave").classList.remove("hidden");
     } catch { out.textContent = "Не удалось снять отпечаток."; }
+  }
+
+  async function loadFingerprints() {
+    try { state.fingerprints = (await api("/api/fingerprints")) || []; }
+    catch { state.fingerprints = []; }
+    renderFingerprints();
+  }
+
+  function renderFingerprints() {
+    const grp = $("#fpGroup");
+    grp.innerHTML = state.fingerprints.map((f) =>
+      `<option value="custom:${escapeHtml(f.name)}">${escapeHtml(f.name)} · ${escapeHtml((f.ja3Md5 || "").slice(0, 8))}</option>`).join("");
+    grp.hidden = state.fingerprints.length === 0;
+    $("#fpList").innerHTML = state.fingerprints.map((f) =>
+      `<div class="fp-item"><button class="fp-x" data-fp="${escapeHtml(f.name)}" title="Удалить из списка">✕</button>` +
+      `<code>${escapeHtml(f.name)}</code> · ${escapeHtml(f.preset || "Chrome")} · ` +
+      `<span class="muted">${escapeHtml((f.ja3Md5 || "").slice(0, 12))}</span></div>`).join("");
+  }
+
+  async function addFingerprint() {
+    if (!state.lastCapture) { flash("Сначала снимите отпечаток"); return; }
+    const name = $("#fpName").value.trim().replace(/[\/\\:]/g, "-");
+    if (!name) { flash("Введите имя отпечатка"); return; }
+    let base = $("#selPreset").value; // record which built-in preset reproduces this JA3
+    if (base.startsWith("custom:")) {
+      const m = state.fingerprints.find((f) => f.name === base.slice(7));
+      base = m ? m.preset : "Chrome";
+    }
+    const res = await postJson("/api/fingerprints",
+      { name, ja3: state.lastCapture.ja3, ja3Md5: state.lastCapture.ja3Md5, preset: base });
+    if (res) {
+      state.fingerprints = res;
+      renderFingerprints();
+      $("#fpName").value = "";
+      $("#fpSave").classList.add("hidden");
+      flash("Отпечаток добавлен: " + name);
+    }
+  }
+
+  async function removeFingerprint(name) {
+    try {
+      const r = await fetch(`/api/fingerprints/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (!r.ok) { flash("Не удалось удалить"); return; }
+      state.fingerprints = await r.json();
+      // The server resets the active selection to Chrome if it was this capture.
+      if ($("#selPreset").value === "custom:" + name) $("#selPreset").value = "Chrome";
+      renderFingerprints();
+      flash("Удалён: " + name);
+    } catch { flash("Не удалось удалить"); }
   }
 
   // ---- modals + UDP install + composer ------------------------------------
@@ -1009,7 +1071,7 @@
 
   wireUi();
   loadStatus();
-  loadSettings();
+  loadFingerprints().then(loadSettings); // options must exist before settings selects one
   loadSessions();
   connectHub();
 })();

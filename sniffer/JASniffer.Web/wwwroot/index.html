@@ -138,12 +138,18 @@
             <option value="Edge">Edge</option>
             <option value="Firefox">Firefox</option>
             <option value="Safari">Safari</option>
+            <optgroup id="fpGroup" label="Захваченные"></optgroup>
           </select>
           <div class="setting-note">TLS (JA3) + HTTP/2 отпечаток, с которым запрос уходит наверх. Смена пересоздаёт апстрим‑клиентов.</div>
+          <div id="fpList" class="fp-list"></div>
           <div class="row-buttons">
             <button class="btn" id="btnSelftest" type="button" title="Снять реальный ClientHello локально (мимо любых TLS-инспекторов)">Проверить отпечаток</button>
           </div>
           <div class="setting-note" id="selftestOut"></div>
+          <div id="fpSave" class="fp-save hidden">
+            <input id="fpName" type="text" class="fp-name" placeholder="Имя снятого отпечатка" />
+            <button class="btn" id="btnFpAdd" type="button" title="Сохранить снятый отпечаток в список выбора">Добавить в список</button>
+          </div>
         </div>
 
         <div class="setting">

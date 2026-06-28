@@ -38,6 +38,7 @@ public sealed class UpstreamRelay : IDisposable
         new(StringComparer.OrdinalIgnoreCase) { "Host", "Content-Length", "Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authorization" };
 
     private readonly SnifferSettings _settings;
+    private readonly FingerprintStore _fingerprints;
     private readonly Lock _swap = new();
     private readonly ConcurrentDictionary<string, string?> _hostIpCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -55,30 +56,33 @@ public sealed class UpstreamRelay : IDisposable
     /// <summary>Display label for the active fingerprint preset, e.g. <c>Chrome 148</c>.</summary>
     public string CurrentPresetLabel { get; private set; }
 
-    public UpstreamRelay(SnifferSettings settings)
+    public UpstreamRelay(SnifferSettings settings, FingerprintStore fingerprints)
     {
         _settings = settings;
-        _preset = ParsePreset(settings.FingerprintPreset);
+        _fingerprints = fingerprints;
+        var (preset, label) = Resolve(settings.FingerprintPreset);
+        _preset = preset;
         _forceHttp1 = settings.ForceHttp1;
         _insecure = settings.IgnoreUpstreamCertErrors;
         _proxyUrl = settings.UpstreamProxy;
         _proxyRotating = settings.RotatingProxy;
-        CurrentPresetLabel = LabelFor(_preset);
+        CurrentPresetLabel = label;
         (_faithful, _follow) = BuildClients(_preset, _forceHttp1, _insecure, settings.MaxRedirects);
         ApplyProxyToClients();
     }
 
     /// <summary>
-    /// Rebuilds the two upstream clients with a new fingerprint preset / forced HTTP
-    /// version / cert-verification setting (no-op if unchanged). The engine bakes
-    /// these at construction, so a rebuild is required; old clients are disposed after
-    /// a short grace so in-flight requests can finish.
+    /// Rebuilds the two upstream clients with a new fingerprint preset (built-in or a
+    /// captured <c>custom:&lt;name&gt;</c>) / forced HTTP version / cert-verification
+    /// setting (no-op if unchanged). The engine bakes these at construction, so a rebuild
+    /// is required; old clients are disposed after a grace so in-flight requests finish.
     /// </summary>
     public void Reconfigure(string presetName, bool forceHttp1, bool insecure)
     {
-        var preset = ParsePreset(presetName);
+        var (preset, label) = Resolve(presetName);
         lock (_swap)
         {
+            CurrentPresetLabel = label; // reflect the selection even if no rebuild is needed
             if (preset == _preset && forceHttp1 == _forceHttp1 && insecure == _insecure)
             {
                 return;
@@ -93,7 +97,6 @@ public sealed class UpstreamRelay : IDisposable
             _preset = preset;
             _forceHttp1 = forceHttp1;
             _insecure = insecure;
-            CurrentPresetLabel = LabelFor(preset);
             ApplyProxyToClients(); // the fresh clients start direct — restore the egress proxy
 
             // Dispose the superseded clients after a grace longer than the request
@@ -135,6 +138,27 @@ public sealed class UpstreamRelay : IDisposable
         });
 
         return (faithful, follow);
+    }
+
+    // Resolves a selector value into (base preset, display label). "custom:<name>" looks
+    // up a saved capture and applies the preset it was captured from — which reproduces
+    // that exact JA3 (a captured fingerprint records its source preset, since a JA3 string
+    // alone can't be replayed faithfully through this engine). Anything else is a built-in
+    // preset; an unknown/dangling value falls back to Chrome.
+    private (Ja3Preset Preset, string Label) Resolve(string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(name) && name.StartsWith("custom:", StringComparison.OrdinalIgnoreCase))
+        {
+            var fpName = name["custom:".Length..];
+            var fp = _fingerprints.Get(fpName);
+            if (fp is not null)
+            {
+                return (ParsePreset(fp.Preset), fpName);
+            }
+        }
+
+        var preset = ParsePreset(name);
+        return (preset, LabelFor(preset));
     }
 
     private static Ja3Preset ParsePreset(string? name)

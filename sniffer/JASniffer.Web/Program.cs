@@ -22,6 +22,8 @@ var settingsPath = Path.Combine(caDir ?? CertificateAuthority.DefaultStoreDirect
 SettingsFile.Apply(settings, settingsPath); // restore persisted preset/redirects/etc.
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<SessionStore>();
+var fingerprintsPath = Path.Combine(caDir ?? CertificateAuthority.DefaultStoreDirectory, "fingerprints.json");
+builder.Services.AddSingleton(new FingerprintStore(fingerprintsPath));
 builder.Services.AddSingleton(CertificateAuthority.LoadOrCreate(caDir));
 builder.Services.AddSingleton<UpstreamRelay>();
 builder.Services.AddSingleton<SystemProxy>();
@@ -223,6 +225,42 @@ api.MapPost("/compose", async (ComposeRequest body, UpstreamRelay relay, Session
 api.MapGet("/fingerprint-selftest", async (UpstreamRelay relay, CancellationToken ct) =>
     Results.Ok(await relay.CaptureClientHelloAsync(ct)));
 
+// Saved/captured fingerprints: list, add (from a self-test capture), remove. Saved
+// entries appear in the upstream-fingerprint selector as "custom:<name>" and are
+// replayed verbatim upstream when selected.
+api.MapGet("/fingerprints", (FingerprintStore store) => store.All());
+
+api.MapPost("/fingerprints", (SaveFingerprintRequest body, FingerprintStore store) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Name) || string.IsNullOrWhiteSpace(body.Ja3))
+    {
+        return Results.BadRequest(new { error = "Имя и JA3 обязательны." });
+    }
+
+    store.Add(new CapturedFingerprint(
+        body.Name!.Trim(), body.Ja3!.Trim(), body.Ja3Md5?.Trim() ?? string.Empty,
+        string.IsNullOrWhiteSpace(body.Preset) ? "Chrome" : body.Preset!.Trim()));
+    return Results.Ok(store.All());
+});
+
+api.MapDelete("/fingerprints/{name}", (string name, FingerprintStore store, SnifferSettings s, UpstreamRelay relay) =>
+{
+    if (!store.Remove(name))
+    {
+        return Results.NotFound();
+    }
+
+    // If the just-removed capture was the active selection, fall back to Chrome.
+    if (string.Equals(s.FingerprintPreset, "custom:" + name, StringComparison.OrdinalIgnoreCase))
+    {
+        s.FingerprintPreset = "Chrome";
+        relay.Reconfigure(s.FingerprintPreset, s.ForceHttp1, s.IgnoreUpstreamCertErrors);
+        SettingsFile.Save(s, settingsPath);
+    }
+
+    return Results.Ok(store.All());
+});
+
 app.MapHub<SessionHub>("/hub/sessions");
 app.MapFallbackToFile("index.html");
 
@@ -291,3 +329,5 @@ internal sealed record TestProxyRequest(string? Proxy);
 internal sealed record UdpToggle(bool Enabled);
 
 internal sealed record ComposeRequest(string? Method, string? Url, string? Headers, string? Body);
+
+internal sealed record SaveFingerprintRequest(string? Name, string? Ja3, string? Ja3Md5, string? Preset);

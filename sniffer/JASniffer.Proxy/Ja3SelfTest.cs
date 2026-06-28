@@ -85,14 +85,44 @@ public static class Ja3SelfTest
         try
         {
             using var socket = await listener.AcceptSocketAsync(ct).ConfigureAwait(false);
-            var buffer = new byte[8192];
-            for (var i = 0; socket.Available == 0 && i < 40; i++)
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+
+            // Read the *whole* first TLS record, not just the first segment. The 5-byte
+            // record header carries its length; a modern ClientHello (X25519MLKEM768 /
+            // ECH) is ~1.5–2 KB and spans several TCP segments, so a single receive
+            // truncates it and the parser never reaches the trailing extensions
+            // (key_share, supported_versions) — which is exactly what made the self-test
+            // report TLS1.3/key_share as absent and "fail".
+            var buffer = new byte[18 * 1024]; // a TLS record maxes at 16 KB + header
+            var total = 0;
+            var need = 5;
+            while (total < need)
             {
-                await Task.Delay(50, ct).ConfigureAwait(false);
+                int n;
+                try
+                {
+                    n = await socket.ReceiveAsync(buffer.AsMemory(total), timeout.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (n == 0)
+                {
+                    break; // peer closed
+                }
+
+                total += n;
+                if (total >= 5)
+                {
+                    var recordLen = (buffer[3] << 8) | buffer[4];
+                    need = Math.Min(5 + recordLen, buffer.Length);
+                }
             }
 
-            var n = socket.Available > 0 ? socket.Receive(buffer) : 0;
-            return buffer[..n];
+            return buffer[..total];
         }
         catch (Exception)
         {
