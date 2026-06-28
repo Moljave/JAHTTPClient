@@ -179,9 +179,12 @@
           <div class="setting-label">Корневой сертификат (CA)</div>
           <div class="row-buttons">
             <button class="btn" id="btnInstallCa" title="Установить CA в доверенные корневые (Windows, авто)">Install CA</button>
-            <button class="btn" id="btnCa" title="Скачать CA для ручной установки (напр. Firefox)">Download CA</button>
+            <button class="btn" id="btnCa" title="Скачать CA (.cer, DER) — Windows / Firefox">Download CA</button>
+            <button class="btn" id="btnCaPem" title="Скачать CA в PEM — Android (user store) / Linux">PEM</button>
+            <button class="btn" id="btnCaAndroid" title="CA для системного хранилища Android: имя &lt;subject_hash_old&gt;.0">Android&nbsp;(.0)</button>
           </div>
           <div class="setting-note" id="caStoreInfo"></div>
+          <div class="setting-note" id="caAndroidInfo"></div>
         </div>
       </div>
     </div>

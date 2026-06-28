@@ -78,7 +78,8 @@ public sealed record StatusDto(
     bool SystemProxyEnabled,
     bool UdpSupported,
     bool UdpRunning,
-    bool WinDivertInstalled);
+    bool WinDivertInstalled,
+    string AndroidCaFile);
 
 /// <summary>Maps capture models to the wire DTOs, decoding textual bodies for display.</summary>
 public static class DtoMapper

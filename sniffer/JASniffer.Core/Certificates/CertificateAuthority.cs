@@ -65,6 +65,26 @@ public sealed class CertificateAuthority
     public byte[] ExportCaCertificateDer() => _caCertificate.Export(X509ContentType.Cert);
 
     /// <summary>
+    /// The root CA in PEM form (<c>-----BEGIN CERTIFICATE-----</c>). This is what
+    /// Android, Linux and most non-Windows trust stores expect.
+    /// </summary>
+    public string ExportCaCertificatePem() => _caCertificate.ExportCertificatePem();
+
+    /// <summary>
+    /// The filename Android expects for a CA in its system trust store
+    /// (<c>/system/etc/security/cacerts/</c>): OpenSSL's <c>subject_hash_old</c> — the
+    /// MD5 of the DER-encoded subject name, first four bytes read little-endian — as
+    /// eight lowercase hex digits, followed by <c>.0</c>. Matches
+    /// <c>openssl x509 -subject_hash_old</c>.
+    /// </summary>
+    public string AndroidSystemCertFileName()
+    {
+        var md5 = MD5.HashData(_caCertificate.SubjectName.RawData);
+        var hash = (uint)(md5[0] | (md5[1] << 8) | (md5[2] << 16) | (md5[3] << 24));
+        return $"{hash:x8}.0";
+    }
+
+    /// <summary>
     /// Installs the root CA (public part only) into the current user's Trusted Root
     /// store so OS-store browsers (Chrome/Edge) trust intercepted HTTPS without a
     /// manual import. On Windows this shows a one-time consent prompt and needs no

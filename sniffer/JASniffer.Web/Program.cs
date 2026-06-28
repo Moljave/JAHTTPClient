@@ -67,7 +67,8 @@ api.MapGet("/status", (CertificateAuthority ca, SystemProxy systemProxy, UdpCapt
     systemProxy.Enabled,
     udp.Supported,
     udp.Running,
-    windivert.IsInstalled));
+    windivert.IsInstalled,
+    ca.AndroidSystemCertFileName()));
 
 api.MapGet("/settings", (SnifferSettings s) => Settings(s));
 
@@ -128,6 +129,18 @@ api.MapPost("/clear", (SessionStore store) =>
 
 api.MapGet("/ca.cer", (CertificateAuthority ca) =>
     Results.File(ca.ExportCaCertificateDer(), "application/x-x509-ca-cert", "JASniffer-rootCA.cer"));
+
+// PEM (BEGIN CERTIFICATE) — what Android/Linux trust stores expect. Good for the
+// Android user store (Settings → install a CA certificate) and rooted-system pushes.
+api.MapGet("/ca.pem", (CertificateAuthority ca) =>
+    Results.File(System.Text.Encoding.ASCII.GetBytes(ca.ExportCaCertificatePem() + "\n"),
+        "application/x-pem-file", "JASniffer-rootCA.pem"));
+
+// Android system-store form: the same PEM, but named <subject_hash_old>.0 so it can be
+// dropped straight into /system/etc/security/cacerts/ (Android 7+/9 trust it for apps).
+api.MapGet("/ca-android", (CertificateAuthority ca) =>
+    Results.File(System.Text.Encoding.ASCII.GetBytes(ca.ExportCaCertificatePem() + "\n"),
+        "application/x-pem-file", ca.AndroidSystemCertFileName()));
 
 api.MapPost("/install-ca", (CertificateAuthority ca) =>
 {

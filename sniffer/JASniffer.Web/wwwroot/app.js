@@ -456,6 +456,8 @@
       window.open("/api/export.saz" + (filtered ? "?ids=" + state.filtered.join(",") : ""), "_blank");
     });
     $("#btnCa").addEventListener("click", () => window.open("/api/ca.cer", "_blank"));
+    $("#btnCaPem").addEventListener("click", () => window.open("/api/ca.pem", "_blank"));
+    $("#btnCaAndroid").addEventListener("click", () => window.open("/api/ca-android", "_blank"));
     $("#hintDownloadCa").addEventListener("click", () => window.open("/api/ca.cer", "_blank"));
     const installCa = async () => {
       try {
@@ -962,6 +964,12 @@
       const caText = "CA: " + st.caSubject + "  ·  " + st.caStoreDirectory;
       $("#caStore").textContent = caText;
       $("#caStoreInfo").textContent = caText;
+      if (st.androidCaFile) {
+        $("#caAndroidInfo").innerHTML =
+          "Android (системно, root/эмулятор): <code>" + escapeHtml(st.androidCaFile) +
+          "</code> → <code>/system/etc/security/cacerts/</code> (chmod 644, ремоунт /system rw, перезагрузка). " +
+          "Без root — кнопка <b>PEM</b>, затем Настройки → Безопасность → установить сертификат CA.";
+      }
       $("#modeHint").textContent = "→ 127.0.0.1:" + st.proxyPort;
       setActiveMode(st.systemProxyEnabled ? "system" : "manual");
       if (!st.systemProxySupported) $("#modeSystem").classList.add("disabled");

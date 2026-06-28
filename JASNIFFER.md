@@ -81,6 +81,22 @@ dotnet run   -c Release --project sniffer/JASniffer.Web     # поднять с�
    - **macOS:** Keychain Access → System → Импорт → Always Trust.
    - **Linux:** скопировать в `/usr/local/share/ca-certificates/` (как `.crt`) и
      `sudo update-ca-certificates`.
+   - **Android 9 (и 7+):**
+     - **PEM:** кнопка **PEM** в UI (или `http://localhost:8888/api/ca.pem`).
+     - **User‑store (без root):** скопировать `.pem` на устройство → Настройки →
+       Безопасность → Шифрование и учётные данные → Установить сертификат → **CA‑сертификат**.
+       Этого хватает браузеру; но с Android 7+ приложения по умолчанию **не** доверяют
+       пользовательским CA — для них нужен системный стор.
+     - **System‑store (root / эмулятор):** кнопка **Android (.0)** отдаёт PEM с именем
+       по `subject_hash_old` (напр. `0dcc6da7.0`). Положить в `/system/etc/security/cacerts/`:
+       ```
+       adb root && adb remount
+       adb push 0dcc6da7.0 /system/etc/security/cacerts/
+       adb shell chmod 644 /system/etc/security/cacerts/0dcc6da7.0
+       adb reboot
+       ```
+       (Имя файла и команда показываются в UI под кнопками CA; имя совпадает с
+       `openssl x509 -subject_hash_old -in JASniffer-rootCA.pem`.)
 
 ### 4. Направление трафика на прокси
 
