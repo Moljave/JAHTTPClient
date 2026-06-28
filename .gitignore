@@ -20,6 +20,10 @@ src/JAHTTPClient/runtimes/**/*.h
 # library runs out of the box on linux-x64 without a local Go/CGO build.
 !src/JAHTTPClient/runtimes/linux-x64/native/tls-client-linux-amd64.so
 
+# Exception: the prebuilt win-x64 native library (bogdanfinn/tls-client v1.14.0,
+# the version go.mod pins) so it runs out of the box on Windows without a Go build.
+!src/JAHTTPClient/runtimes/win-x64/native/tls-client-windows-64.dll
+
 # Go
 native/go.sum
 
@@ -27,3 +31,9 @@ native/go.sum
 .vs/
 .idea/
 *.swp
+
+# local test artifacts
+/ca.cer
+/ca.pem
+/*.saz
+/Project.zip

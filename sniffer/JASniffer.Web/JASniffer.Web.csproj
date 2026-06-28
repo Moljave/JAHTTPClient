@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The startup project: an ASP.NET Core (Kestrel) host that serves the SPA from
+    wwwroot, exposes the REST + SignalR surface for the UI, and runs the MITM proxy
+    in-process as a hosted service. "dotnet run" brings up both the UI (:8888) and
+    the proxy (:8866). Framework/language settings come from Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <RootNamespace>JASniffer.Web</RootNamespace>
+    <AssemblyName>JASniffer.Web</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../JASniffer.Core/JASniffer.Core.csproj" />
+    <ProjectReference Include="../JASniffer.Proxy/JASniffer.Proxy.csproj" />
+  </ItemGroup>
+
+</Project>

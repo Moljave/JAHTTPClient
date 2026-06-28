@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The intercepting proxy: a TcpListener on 127.0.0.1:8866 that speaks HTTP/1.1
+    and CONNECT to the browser, terminates TLS with on-the-fly leaf certs, and
+    re-issues every request upstream through JAHTTPClient (Chrome JA3/JA4 + h2).
+    Settings/language come from the repo-level Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>JASniffer.Proxy</RootNamespace>
+    <AssemblyName>JASniffer.Proxy</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/JAHTTPClient/JAHTTPClient.csproj" />
+    <ProjectReference Include="../JASniffer.Core/JASniffer.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

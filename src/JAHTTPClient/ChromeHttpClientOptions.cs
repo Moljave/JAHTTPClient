@@ -80,6 +80,42 @@ public sealed class ChromeHttpClientOptions
     public bool ForceHttp1 { get; set; }
 
     /// <summary>
+    /// Run requests without the per-session cookie jar: server <c>Set-Cookie</c>
+    /// headers are neither persisted nor auto-replayed, and only the cookies the
+    /// caller puts on the request (e.g. a verbatim <c>Cookie</c> header) are sent.
+    /// Defaults to false (the persistent jar is used).
+    /// </summary>
+    /// <remarks>
+    /// This is what a faithful intercepting proxy wants: the upstream request must
+    /// carry exactly the cookies the browser sent — no more, no less — so a shared
+    /// client never contaminates one host/tab with another's cookies. The native
+    /// tls-client contract supports this per request (<c>withoutCookieJar</c>).
+    /// Note that with the jar disabled, managed redirect following no longer
+    /// carries <c>Set-Cookie</c> values across hops, so leave it false when you rely
+    /// on <see cref="AllowAutoRedirect"/> to walk a chain — or use
+    /// <see cref="IsolateRedirectCookies"/> to carry them in request-scoped state.
+    /// </remarks>
+    public bool WithoutCookieJar { get; set; }
+
+    /// <summary>
+    /// Walk an automatic redirect chain carrying <c>Set-Cookie</c> across hops in
+    /// <b>request-scoped</b> managed state instead of the shared per-session jar. The
+    /// native jar is bypassed entirely (as if <see cref="WithoutCookieJar"/> were set),
+    /// so cookies set during one request's redirect chain are honored on its later hops
+    /// but never persist into other requests on the same client. Defaults to false.
+    /// </summary>
+    /// <remarks>
+    /// This is what a shared intercepting-proxy client wants when it follows redirects:
+    /// correct within-chain cookie behavior (login/SSO flows that set a cookie then
+    /// redirect) with no cross-request/cross-tab contamination, and no need to rebuild
+    /// the client (which would drop its connection pool). Cookies are scoped per host by
+    /// the BCL <see cref="CookieContainer"/>; the caller's verbatim <c>Cookie</c> header
+    /// seeds the chain for the initial host. Has no effect when
+    /// <see cref="AllowAutoRedirect"/> is false.
+    /// </remarks>
+    public bool IsolateRedirectCookies { get; set; }
+
+    /// <summary>
     /// Optional cap on concurrent in-flight native requests. 0 (default) = no
     /// limit. Set a positive value to bound memory under extreme fan-out, since
     /// each in-flight request holds a managed thread blocked on the native call.

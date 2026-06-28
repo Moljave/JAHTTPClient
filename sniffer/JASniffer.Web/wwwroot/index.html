@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JASniffer — Chrome-fingerprint HTTPS sniffer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand">
+      <span class="logo">JA</span>
+      <div>
+        <div class="title">JASniffer</div>
+        <div class="subtitle">HTTPS sniffer · upstream fingerprint <b id="presetLabel">Chrome 148</b></div>
+      </div>
+    </div>
+
+    <div class="toolbar-actions">
+      <button id="btnResender" class="btn" title="Редактировать запрос и отправить через движок с отпечатком Chrome, видя ответ рядом">⤴ Resender</button>
+      <button id="btnClear" class="btn" title="Очистить список сессий">Clear</button>
+      <button id="btnExport" class="btn" title="Экспорт сессий в архив Fiddler .saz">Export .saz</button>
+      <button id="btnSettings" class="btn" title="Настройки">⚙ Settings</button>
+      <span id="connDot" class="dot dot-off" title="SignalR connection"></span>
+    </div>
+  </header>
+
+  <div class="filterbar">
+    <input type="search" id="filterText" class="filter-input" placeholder="Фильтр по URL, host, методу, статусу или телу…" />
+    <select id="filterMethod" class="filter-select"><option value="">Method</option></select>
+    <select id="filterStatus" class="filter-select">
+      <option value="">Status</option>
+      <option value="2">2xx</option><option value="3">3xx</option>
+      <option value="4">4xx</option><option value="5">5xx</option>
+    </select>
+    <select id="filterType" class="filter-select"><option value="">Content-Type</option></select>
+    <span id="filterChip" class="filter-chip hidden" title="Сбросить фильтр по хосту"></span>
+    <span id="counts" class="counts"></span>
+  </div>
+
+  <main class="split">
+    <!-- session grid (virtualized) -->
+    <section class="grid-pane" id="gridPane">
+      <div class="grid-head">
+        <div class="col col-id">#</div>
+        <div class="col col-res">Result</div>
+        <div class="col col-proto">Proto</div>
+        <div class="col col-method">Method</div>
+        <div class="col col-host">Host</div>
+        <div class="col col-url">URL</div>
+        <div class="col col-type">Type</div>
+        <div class="col col-size">Size</div>
+        <div class="col col-time">Time</div>
+      </div>
+      <div class="grid-scroll" id="gridScroll">
+        <div class="grid-rows" id="gridRows"></div>
+        <div id="gridEmpty" class="grid-empty hidden"></div>
+      </div>
+    </section>
+
+    <div class="divider" id="divider"></div>
+
+    <!-- inspectors -->
+    <section class="inspect-pane">
+      <div class="inspect req">
+        <div class="inspect-head">
+          <span class="inspect-title">Request</span>
+          <span id="reqBadges" class="badges"></span>
+          <button id="btnReqCurl" class="mini-btn" title="Скопировать запрос как cURL">cURL</button>
+        </div>
+        <nav class="tabs" id="reqTabs">
+          <button class="tab active" data-tab="headers">Headers</button>
+          <button class="tab" data-tab="params">Params</button>
+          <button class="tab" data-tab="cookies">Cookies</button>
+          <button class="tab" data-tab="auth">Auth</button>
+          <button class="tab" data-tab="raw">Raw</button>
+          <button class="tab" data-tab="body">Body</button>
+        </nav>
+        <div class="tab-body" id="reqBody"><div class="empty">Выберите сессию для просмотра.</div></div>
+      </div>
+
+      <div class="inspect-divider" id="inspectDivider"></div>
+
+      <div class="inspect res">
+        <div class="inspect-head">
+          <span class="inspect-title">Response</span>
+          <span id="resBadges" class="badges"></span>
+        </div>
+        <nav class="tabs" id="resTabs">
+          <button class="tab active" data-tab="headers">Headers</button>
+          <button class="tab" data-tab="cookies">Cookies</button>
+          <button class="tab" data-tab="raw">Raw</button>
+          <button class="tab" data-tab="preview">Preview</button>
+          <button class="tab" data-tab="body">Body</button>
+        </nav>
+        <div class="tab-body" id="resBody"><div class="empty">Выберите сессию для просмотра.</div></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="caHint" class="hint hidden">
+    <div class="hint-card">
+      <h3>Install the root CA to decrypt HTTPS</h3>
+      <p>JASniffer signs per-site certificates with its own root CA. Until you trust it,
+         HTTPS sites will warn. On Windows just press <b>Install CA</b> (one-time consent
+         prompt, no admin) — Chrome/Edge will trust it. Firefox uses its own store: use
+         <b>Download CA</b> and import it. Then choose <b>System</b> mode or point your app at
+         <code>127.0.0.1:<span id="hintPort">8866</span></code>.</p>
+      <p class="muted" id="caStore"></p>
+      <div class="hint-actions">
+        <button class="btn" id="hintInstallCa">Install CA automatically</button>
+        <button class="btn" id="hintDownloadCa">Download CA (.cer)</button>
+        <button class="btn ghost" id="hintClose">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings menu (everything lives here) -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h3>Настройки</h3><button class="x" id="settingsClose" title="Закрыть">✕</button></div>
+      <div class="modal-body">
+        <div class="setting">
+          <div class="setting-label">Режим захвата</div>
+          <div class="seg-group">
+            <button id="modeManual" class="seg active" type="button">Manual</button>
+            <button id="modeSystem" class="seg" type="button">System</button>
+            <span id="modeHint" class="seg-hint"></span>
+          </div>
+          <div class="setting-note"><b>System</b> — системный прокси ОС (весь трафик, Windows). <b>Manual</b> — ловится только то, что направлено на <code>127.0.0.1:8866</code>.</div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">JA3 / отпечаток апстрима</div>
+          <select id="selPreset" class="filter-select">
+            <option value="Chrome">Chrome 148</option>
+            <option value="ChromeLatest">Chrome 146 (новейший в либе)</option>
+            <option value="Edge">Edge</option>
+            <option value="Firefox">Firefox</option>
+            <option value="Safari">Safari</option>
+            <optgroup id="fpGroup" label="Захваченные"></optgroup>
+          </select>
+          <div class="setting-note">TLS (JA3) + HTTP/2 отпечаток, с которым запрос уходит наверх. Смена пересоздаёт апстрим‑клиентов.</div>
+          <div id="fpList" class="fp-list"></div>
+          <div class="row-buttons">
+            <button class="btn" id="btnSelftest" type="button" title="Снять реальный ClientHello локально (мимо любых TLS-инспекторов)">Проверить отпечаток</button>
+          </div>
+          <div class="setting-note" id="selftestOut"></div>
+          <div id="fpSave" class="fp-save hidden">
+            <input id="fpName" type="text" class="fp-name" placeholder="Имя снятого отпечатка" />
+            <button class="btn" id="btnFpAdd" type="button" title="Сохранить снятый отпечаток в список выбора">Добавить в список</button>
+          </div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">Протокол и поведение</div>
+          <div class="toggles">
+            <label class="toggle" title="Перехватывать (MITM) HTTPS на любом порту, а не только 443/8443 — нужно для локальных dev‑серверов на нестандартных портах"><input type="checkbox" id="tglInterceptAll" checked /> <span>Перехват HTTPS на всех портах</span></label>
+            <label class="toggle" title="Не проверять сертификат апстрим‑сервера — для локальных dev‑серверов с самоподписанными сертификатами"><input type="checkbox" id="tglInsecure" /> <span>Игнорировать ошибки сертификата апстрима</span></label>
+            <label class="toggle" title="Принудительно HTTP/1.1 вместо согласования HTTP/2"><input type="checkbox" id="tglForceHttp1" /> <span>Принудительно HTTP/1.1</span></label>
+            <label class="toggle" title="Проходить цепочку редиректов наверху и отдавать только финальный ответ"><input type="checkbox" id="tglRedirects" /> <span>Smart Redirects</span></label>
+            <label class="num-row" title="Сколько редиректов проходить наверху при включённом Smart Redirects (1–50)"><span>Макс. редиректов наверху</span><input type="number" id="numMaxRedirects" class="num-input" min="1" max="50" step="1" value="10" /></label>
+            <label class="toggle" title="Записывать перехваченный трафик в список"><input type="checkbox" id="tglCapture" checked /> <span>Capture</span></label>
+            <label class="toggle" title="Пассивный захват UDP (DNS/QUIC) через WinDivert — Windows, нужен админ"><input type="checkbox" id="tglUdp" /> <span>UDP (WinDivert)</span></label>
+          </div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">Апстрим‑прокси (исходящий)</div>
+          <div class="cmp-line">
+            <input id="txtProxy" class="filter-input" placeholder="http://login:pass@ip:port · socks5://ip:port · ip:port:login:pass" />
+            <button class="btn" id="btnTestProxy" type="button" title="Проверить прокси — покажет внешний IP">Тест</button>
+          </div>
+          <label class="toggle" title="Прокси меняет exit‑IP на каждый запрос (отключает пул соединений против EOF)"><input type="checkbox" id="tglRotating" /> <span>Ротационный прокси</span></label>
+          <div class="setting-note" id="proxyTestOut">Весь исходящий (апстрим) трафик идёт через прокси; расшифрованные сессии вы по‑прежнему видите. Форматы: <code>http://user:pass@ip:port</code>, <code>socks5://ip:port</code>, <code>ip:port</code>, <code>ip:port:user:pass</code>.</div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">Пропускать без расшифровки (хосты)</div>
+          <textarea id="txtBypass" class="cmp-area" rows="3" spellcheck="false" placeholder="cdn.ls.app&#10;example.com"></textarea>
+          <div class="setting-note">По строке/через запятую. Эти хосты идут сырым туннелем (без MITM) — для сайтов с pinning или тех, что ломаются при перехвате. Хост охватывает и поддомены (<code>ls.app</code> → <code>cdn.ls.app</code>). В списке видны как «tunnel».</div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-label">Корневой сертификат (CA)</div>
+          <div class="row-buttons">
+            <button class="btn" id="btnInstallCa" title="Установить CA в доверенные корневые (Windows, авто)">Install CA</button>
+            <button class="btn" id="btnCa" title="Скачать CA (.cer, DER) — Windows / Firefox">Download CA</button>
+            <button class="btn" id="btnCaPem" title="Скачать CA в PEM — Android (user store) / Linux">PEM</button>
+            <button class="btn" id="btnCaAndroid" title="CA для системного хранилища Android: имя &lt;subject_hash_old&gt;.0">Android&nbsp;(.0)</button>
+          </div>
+          <div class="setting-note" id="caStoreInfo"></div>
+          <div class="setting-note" id="caAndroidInfo"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resender: edit a request, resend, see the response inline -->
+  <div id="resenderModal" class="modal hidden">
+    <div class="modal-card xl">
+      <div class="modal-head">
+        <h3>Resender</h3>
+        <select id="rsHistory" class="filter-select rs-history"><option value="">История (0)</option></select>
+        <button class="x" id="rsClose" title="Закрыть">✕</button>
+      </div>
+      <div class="resender-body">
+
+        <!-- left: request editor -->
+        <section class="resender-req">
+          <div class="cmp-line">
+            <select id="rsMethod" class="filter-select">
+              <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
+              <option>PATCH</option><option>HEAD</option><option>OPTIONS</option>
+            </select>
+            <input id="rsUrl" class="filter-input" placeholder="https://example.com/path" />
+            <button class="btn primary" id="rsSend">Send</button>
+          </div>
+          <nav class="tabs" id="rsReqTabs">
+            <button class="tab active" data-tab="headers" type="button">Headers</button>
+            <button class="tab" data-tab="body" type="button">Body</button>
+            <button class="mini-btn rs-raw" id="btnRsRaw" type="button" title="Переключить таблицу/текст">Raw</button>
+            <button class="mini-btn" id="rsAddHeader" type="button" title="Добавить заголовок">+ Заголовок</button>
+          </nav>
+          <div class="resender-editor">
+            <div id="rsHeadersPane">
+              <div id="rsHeaders" class="hrows"></div>
+              <textarea id="rsHeadersRaw" class="cmp-area hidden" rows="12" spellcheck="false" placeholder="Accept: application/json"></textarea>
+            </div>
+            <div id="rsBodyPane" class="hidden">
+              <textarea id="rsBody" class="cmp-area" rows="14" spellcheck="false" placeholder="тело запроса"></textarea>
+            </div>
+          </div>
+          <div class="setting-note" id="rsStatus">Правьте запрос и нажмите Send — ответ появится справа.</div>
+        </section>
+
+        <div class="resender-vdiv"></div>
+
+        <!-- right: response viewer -->
+        <section class="resender-res">
+          <div class="inspect-head">
+            <span class="inspect-title">Response</span>
+            <span id="rsResBadges" class="badges"><span class="muted">Ответ появится здесь после Send.</span></span>
+          </div>
+          <nav class="tabs" id="rsResTabs">
+            <button class="tab active" data-tab="headers" type="button">Headers</button>
+            <button class="tab" data-tab="cookies" type="button">Cookies</button>
+            <button class="tab" data-tab="body" type="button">Body</button>
+            <button class="tab" data-tab="preview" type="button">Preview</button>
+            <button class="tab" data-tab="raw" type="button">Raw</button>
+          </nav>
+          <div class="tab-body" id="rsResBody"></div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <div id="ctxMenu" class="ctx hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="lib/signalr.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
