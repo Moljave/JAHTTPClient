@@ -397,3 +397,19 @@ kbd {
 
 /* ---- request/response inspector: start-time line ---- */
 .inspect-time { color: var(--muted-2); font-size: 11px; font-variant-numeric: tabular-nums; margin-right: 4px; }
+
+/* ---- Info tab (deep per-request breakdown) ---- */
+.info-grp { margin-bottom: 14px; }
+.info-grp > .section-label { margin-top: 0; }
+.info-grp .kv td.v { font-size: 12px; }
+
+/* ---- full fingerprint scan (Settings) ---- */
+.scan-out { margin-top: 8px; }
+.scan-out:empty { margin: 0; }
+.scan-engine { font-size: 11px; color: var(--muted); line-height: 1.55; margin-bottom: 8px; }
+.scan-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 7px; }
+.scan-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.scan-table th, .scan-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--row-line); white-space: nowrap; }
+.scan-table tr:last-child td { border-bottom: none; }
+.scan-table th { color: var(--muted); text-transform: uppercase; letter-spacing: .03em; font-weight: 600; background: var(--bg-2); position: sticky; top: 0; }
+.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; color: var(--text); }

@@ -20,6 +20,12 @@
     maxRedirects: 10,      // restored from /settings; preserved across saves
     fingerprints: [],      // captured fingerprints saved to the selection list
     lastCapture: null,     // { ja3, ja3Md5 } from the most recent self-test
+    fpScan: null,          // { preset -> Ja3Report } from the last full device scan (for the Info tab)
+    // Applied (committed) proxy + fingerprint — edited in the fields, committed via Apply.
+    // Auto-saved toggles use these so a half-typed proxy/preset is never applied by accident.
+    appliedProxy: "",
+    appliedRotating: false,
+    appliedPreset: "Chrome",
     // Resender
     rsDetail: null,        // last response detail shown in the Resender
     rsResTab: "headers",
@@ -329,6 +335,7 @@
       case "params": html = d.queryParams.length ? kvTable(d.queryParams.map((p) => [p.name, p.value])) : note("Нет query-параметров."); break;
       case "cookies": html = d.requestCookies.length ? kvTable(d.requestCookies.map((c) => [c.name, c.value])) : note("Нет cookie запроса."); break;
       case "auth": html = renderAuth(d); break;
+      case "info": html = renderInfo(d); break;
       case "raw": html = `<pre class="raw">${escapeHtml(buildRaw(d, false))}</pre>`; break;
       case "body": html = renderBody(d.requestBody, d.summary.id, "request"); break;
     }
@@ -379,6 +386,99 @@
     if (a.password != null) rows += `<tr><td class="k">Password</td><td class="v">${escapeHtml(a.password)}</td></tr>`;
     if (a.token != null) rows += `<tr><td class="k">Token</td><td class="v">${escapeHtml(a.token)}</td></tr>`;
     return `<table class="kv">${rows}</table>`;
+  }
+
+  // ---- deep per-request Info tab ------------------------------------------
+  const hex4 = (n) => "0x" + Number(n).toString(16).padStart(4, "0");
+  const yesno = (b) => b ? "да" : "нет";
+
+  function kvRows(pairs) {
+    return pairs
+      .filter(([, v]) => v != null && v !== "")
+      .map(([k, v]) => `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`)
+      .join("");
+  }
+  function kvSection(title, pairs) {
+    const rows = kvRows(pairs);
+    return rows ? `<div class="info-grp"><div class="section-label">${escapeHtml(title)}</div><table class="kv">${rows}</table></div>` : "";
+  }
+
+  // A maximally-detailed breakdown of one request: client, versions, the engine's real
+  // TLS fingerprint (JA3 + JA4 + parsed detail, cross-referenced from the full scan),
+  // upstream result, timings and sizes.
+  function renderInfo(d) {
+    const s = d.summary;
+    const fp = state.fpScan ? state.fpScan[s.fingerprintPreset] : null;
+
+    const client = kvSection("Клиент", [
+      ["Клиент (endpoint)", d.clientEndpoint],
+      ["Метод", s.method],
+      ["URL", s.url],
+      ["Схема", s.scheme],
+      ["Хост", s.host],
+      ["Порт", s.port],
+      ["Путь", s.path],
+      ["Query-параметров", d.queryParams.length],
+    ]);
+
+    const timing = kvSection("Время", [
+      ["Начало", fullTime(s.startedUtc)],
+      ["Длительность", s.completed ? Math.round(s.durationMs) + " ms" : "…"],
+    ]);
+
+    const proto = kvSection("Протокол и версии", [
+      ["Браузер ↔ прокси", "HTTP/" + s.requestHttpVersion + " (ALPN всегда http/1.1)"],
+      ["Прокси ↔ сайт", s.wasTunneled ? "туннель (без инспекции)" : httpLabel(s.responseHttpVersion)],
+      ["TLS (апстрим)", d.tlsSummary || "—"],
+    ]);
+
+    let fpRows;
+    if (s.wasTunneled || s.isUdp) {
+      fpRows = `<tr><td class="k">—</td><td class="v muted">Сессия не проходила через движок (туннель / UDP).</td></tr>`;
+    } else if (fp && fp.ok) {
+      fpRows = kvRows([
+        ["Пресет", fp.preset],
+        ["JA3", fp.ja3Md5],
+        ["JA3 (строка)", fp.ja3],
+        ["JA4", fp.ja4],
+        ["TLS", fp.tlsVersion],
+        ["Шифры / расширения", fp.cipherCount + " / " + fp.extensionCount],
+        ["ALPN", (fp.alpn || []).join(", ")],
+        ["TLS 1.3 / key_share / GREASE", `${yesno(fp.tls13)} / ${yesno(fp.keyShare)} / ${yesno(fp.grease)}`],
+        ["Кривые (groups)", (fp.curves || []).map(hex4).join(" ")],
+        ["Алгоритмы подписи", (fp.signatureAlgorithms || []).map(hex4).join(" ")],
+        ["Версии (supported_versions)", (fp.supportedVersions || []).map(hex4).join(" ")],
+      ]);
+    } else {
+      fpRows = `<tr><td class="k">Пресет</td><td class="v">${escapeHtml(s.fingerprintPreset)}` +
+        `<div class="muted">Реальный JA3/JA4 движка — <span class="dl" data-scan>снять для всех пресетов</span> (по loopback, мимо TLS‑инспекторов).</div></td></tr>`;
+    }
+    const fpSection = `<div class="info-grp"><div class="section-label">Отпечаток движка (апстрим‑лег)</div><table class="kv">${fpRows}</table></div>`;
+
+    const upstream = kvSection("Апстрим", [
+      ["IP хоста", d.hostIp],
+      ["Апстрим OK", s.wasTunneled ? null : yesno(s.upstreamOk)],
+      ["Ошибка", s.error],
+      ["Следовал редиректам", yesno(s.followedRedirects)],
+      ["Финальный URL", s.finalUrl && s.finalUrl !== s.url ? s.finalUrl : null],
+    ]);
+
+    const sizes = kvSection("Размеры", [
+      ["Тело запроса", d.requestBody && d.requestBody.size ? formatBytes(d.requestBody.size) + (d.requestBody.truncated ? " (обрезано)" : "") : "0 B"],
+      ["Тело ответа", s.wasTunneled
+        ? formatBytes((s.tunnelBytesUp || 0) + (s.tunnelBytesDown || 0)) + " (туннель)"
+        : (s.bodyLength ? formatBytes(s.bodyLength) : "0 B")],
+      ["Content-Type ответа", s.responseContentType],
+    ]);
+
+    const counts = kvSection("Заголовки и cookie", [
+      ["Заголовков запроса", d.requestHeaders.length],
+      ["Заголовков ответа", d.responseHeaders.length],
+      ["Cookie запроса", d.requestCookies.length],
+      ["Set-Cookie ответа", d.responseCookies.length],
+    ]);
+
+    return client + timing + proto + fpSection + upstream + sizes + counts;
   }
 
   function renderResCookies(d) {
@@ -444,6 +544,9 @@
     container.querySelectorAll("[data-dl]").forEach((n) =>
       n.addEventListener("click", () => window.open(`/api/sessions/${n.dataset.id}/${n.dataset.dl}-body?download=true`, "_blank")));
     container.querySelectorAll("[data-hex]").forEach((n) => loadHex(n));
+    // "снять для всех пресетов" link in the Info tab → run the full scan, then re-render.
+    container.querySelectorAll("[data-scan]").forEach((n) =>
+      n.addEventListener("click", async () => { n.textContent = "снимаю…"; await runFullScan(); if (state.reqTab === "info") renderReqTab("info"); }));
   }
 
   async function loadHex(node) {
@@ -533,15 +636,19 @@
     $("#modeManual").addEventListener("click", () => applyMode("manual"));
     $("#modeSystem").addEventListener("click", () => applyMode("system"));
     $("#tglUdp").addEventListener("change", onUdpToggle);
-    $("#selPreset").addEventListener("change", saveSettings);
+    // Preset + proxy are applied explicitly (Apply/Reset); reflect the label live on change.
+    $("#selPreset").addEventListener("change", () => { $("#presetLabel").textContent = presetLabelFor($("#selPreset").value); });
+    $("#btnApplyPreset").addEventListener("click", applyPreset);
+    $("#btnResetPreset").addEventListener("click", resetPreset);
+    $("#btnApplyProxy").addEventListener("click", applyProxy);
+    $("#btnResetProxy").addEventListener("click", resetProxy);
     $("#tglForceHttp1").addEventListener("change", saveSettings);
     $("#tglInterceptAll").addEventListener("change", saveSettings);
     $("#tglInsecure").addEventListener("change", saveSettings);
     $("#txtBypass").addEventListener("change", saveSettings);
-    $("#txtProxy").addEventListener("change", saveSettings);
-    $("#tglRotating").addEventListener("change", saveSettings);
     $("#btnTestProxy").addEventListener("click", testProxy);
     $("#btnSelftest").addEventListener("click", runSelfTest);
+    $("#btnFullScan").addEventListener("click", runFullScan);
     $("#btnFpAdd").addEventListener("click", addFingerprint);
     $("#fpList").addEventListener("click", (e) => {
       const b = e.target.closest(".fp-x");
@@ -596,6 +703,9 @@
     initDividers();
   }
 
+  // Sends the full settings object. The proxy + fingerprint come from the APPLIED state
+  // (committed via their Apply buttons), NOT the live fields — so auto-saving an unrelated
+  // toggle can never apply a half-typed proxy or an un-applied preset.
   async function saveSettings() {
     const mr = parseInt($("#numMaxRedirects").value, 10);
     if (Number.isFinite(mr) && mr >= 1 && mr <= 50) state.maxRedirects = mr;
@@ -603,18 +713,50 @@
       smartRedirects: $("#tglRedirects").checked,
       maxRedirects: state.maxRedirects || 10,
       capture: $("#tglCapture").checked,
-      upstreamProxy: $("#txtProxy").value,
-      rotatingProxy: $("#tglRotating").checked,
-      fingerprintPreset: $("#selPreset").value,
+      upstreamProxy: state.appliedProxy,
+      rotatingProxy: state.appliedRotating,
+      fingerprintPreset: state.appliedPreset,
       forceHttp1: $("#tglForceHttp1").checked,
       interceptAllPorts: $("#tglInterceptAll").checked,
       ignoreUpstreamCertErrors: $("#tglInsecure").checked,
       bypassHosts: $("#txtBypass").value,
     };
     const res = await postJson("/api/settings", dto);
-    if (res) $("#txtProxy").value = res.upstreamProxy || ""; // show the canonicalized proxy
-    const label = $("#selPreset").selectedOptions[0]?.textContent || $("#selPreset").value;
-    $("#presetLabel").textContent = label;
+    if (res) state.appliedProxy = res.upstreamProxy || ""; // server-decoded friendly form
+    $("#presetLabel").textContent = presetLabelFor(state.appliedPreset);
+    return res;
+  }
+
+  // Human label for a preset value (built-in option text or a captured "custom:<name>").
+  function presetLabelFor(value) {
+    const opt = [...$("#selPreset").options].find((o) => o.value === value);
+    return opt ? opt.textContent : (value || "Chrome");
+  }
+
+  // ---- Apply / Reset: proxy ------------------------------------------------
+  async function applyProxy() {
+    state.appliedProxy = $("#txtProxy").value.trim();
+    state.appliedRotating = $("#tglRotating").checked;
+    await saveSettings();
+    $("#txtProxy").value = state.appliedProxy; // reflect the server-canonicalized (decoded) form
+    flash(state.appliedProxy ? "Прокси применён" : "Прокси очищен (прямое соединение)");
+  }
+  function resetProxy() {
+    $("#txtProxy").value = state.appliedProxy;
+    $("#tglRotating").checked = state.appliedRotating;
+    flash("Поле прокси сброшено");
+  }
+
+  // ---- Apply / Reset: fingerprint preset -----------------------------------
+  async function applyPreset() {
+    state.appliedPreset = $("#selPreset").value;
+    await saveSettings();
+    flash("Отпечаток применён: " + presetLabelFor(state.appliedPreset));
+  }
+  function resetPreset() {
+    $("#selPreset").value = state.appliedPreset;
+    $("#presetLabel").textContent = presetLabelFor(state.appliedPreset);
+    flash("Выбор отпечатка сброшен");
   }
 
   async function testProxy() {
@@ -647,6 +789,35 @@
       $("#fpName").value = (r.preset || "").split(" · ")[0];
       $("#fpSave").classList.remove("hidden");
     } catch { out.textContent = "Не удалось снять отпечаток."; }
+  }
+
+  // Full device scan (#3): every preset's real JA3 + JA4 + engine identity, captured locally.
+  async function runFullScan() {
+    const out = $("#scanOut");
+    out.innerHTML = `<div class="note">Снимаю отпечатки всех пресетов локально…</div>`;
+    try {
+      const r = await api("/api/fingerprint-scan");
+      state.fpScan = {};
+      (r.fingerprints || []).forEach((f) => { state.fpScan[f.preset] = f; });
+      out.innerHTML = renderScan(r);
+    } catch { out.innerHTML = `<div class="note">Не удалось выполнить скан.</div>`; }
+  }
+
+  function renderScan(r) {
+    const e = r.engine || {};
+    const eng = `<div class="scan-engine"><b>Устройство / движок:</b> ${escapeHtml(e.os || "")} · ${escapeHtml(e.framework || "")} · ` +
+      `ОС ${escapeHtml(e.osArchitecture || "")}, процесс ${escapeHtml(e.processArchitecture || "")}<br>` +
+      `Активный пресет: <b>${escapeHtml(e.activePreset || "")}</b>${e.forceHttp1 ? " · форс HTTP/1.1" : ""} · ` +
+      `${e.egressProxy ? "прокси " + escapeHtml(e.egressProxy) : "прямое соединение"}</div>`;
+    const rows = (r.fingerprints || []).map((f) => f.ok
+      ? `<tr><td>${escapeHtml(f.preset)}</td><td>${escapeHtml(f.tlsVersion || "")}</td>` +
+        `<td>${f.cipherCount}/${f.extensionCount}</td><td>${escapeHtml((f.alpn || []).join(","))}</td>` +
+        `<td class="mono" title="${escapeHtml(f.ja3)}">${escapeHtml(f.ja3Md5)}</td><td class="mono">${escapeHtml(f.ja4)}</td></tr>`
+      : `<tr><td>${escapeHtml(f.preset)}</td><td colspan="5" class="muted">${escapeHtml(f.error || "ошибка")}</td></tr>`).join("");
+    return eng +
+      `<div class="scan-wrap"><table class="scan-table">` +
+      `<tr><th>Пресет</th><th>TLS</th><th>Ciph/Ext</th><th>ALPN</th><th>JA3 (md5)</th><th>JA4</th></tr>${rows}</table></div>` +
+      `<div class="setting-note">Снято по loopback — мимо любых TLS‑инспекторов. JA4 нормализует порядок, поэтому у Chrome/Edge/Safari он может совпасть, а JA3 (учитывает порядок) — различаться.</div>`;
   }
 
   async function loadFingerprints() {
@@ -691,9 +862,11 @@
       const r = await fetch(`/api/fingerprints/${encodeURIComponent(name)}`, { method: "DELETE" });
       if (!r.ok) { flash("Не удалось удалить"); return; }
       state.fingerprints = await r.json();
-      // The server resets the active selection to Chrome if it was this capture.
+      // The server resets the active selection to Chrome if it was this capture — mirror it.
+      if (state.appliedPreset === "custom:" + name) state.appliedPreset = "Chrome";
       if ($("#selPreset").value === "custom:" + name) $("#selPreset").value = "Chrome";
       renderFingerprints();
+      $("#presetLabel").textContent = presetLabelFor(state.appliedPreset);
       flash("Удалён: " + name);
     } catch { flash("Не удалось удалить"); }
   }
@@ -1189,9 +1362,12 @@
       $("#txtBypass").value = s.bypassHosts || "";
       $("#txtProxy").value = s.upstreamProxy || "";
       $("#tglRotating").checked = s.rotatingProxy;
+      state.appliedProxy = s.upstreamProxy || "";
+      state.appliedRotating = !!s.rotatingProxy;
       state.maxRedirects = s.maxRedirects > 0 ? s.maxRedirects : 10;
       $("#numMaxRedirects").value = state.maxRedirects;
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
+      state.appliedPreset = s.fingerprintPreset || "Chrome";
       const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
       if (label) $("#presetLabel").textContent = label;
       syncCaptureUi(); // reflect persisted capture state in the toolbar (pill + Pause button)

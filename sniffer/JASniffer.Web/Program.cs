@@ -225,6 +225,12 @@ api.MapPost("/compose", async (ComposeRequest body, UpstreamRelay relay, Session
 api.MapGet("/fingerprint-selftest", async (UpstreamRelay relay, CancellationToken ct) =>
     Results.Ok(await relay.CaptureClientHelloAsync(ct)));
 
+// Full device scan: the real TLS fingerprint (JA3 + JA4 + parsed detail) of EVERY built-in
+// preset the engine can emit, plus host/engine identity — all captured over loopback so it
+// is truthful even on a host whose outbound TLS is intercepted.
+api.MapGet("/fingerprint-scan", async (UpstreamRelay relay, CancellationToken ct) =>
+    Results.Ok(await relay.CaptureAllFingerprintsAsync(ct)));
+
 // Saved/captured fingerprints: list, add (from a self-test capture), remove. Saved
 // entries appear in the upstream-fingerprint selector as "custom:<name>" and are
 // replayed verbatim upstream when selected.
@@ -301,8 +307,10 @@ static IResult ServeBody(byte[] body, string? contentType, string name, bool dow
     return Results.Bytes(body, type);
 }
 
+// The proxy is echoed to the UI in a human-friendly, DECODED form (ProxyUrl.ToDisplay)
+// so the field never shows percent-encoded credentials and re-saving can't double-encode.
 static SettingsDto Settings(SnifferSettings s) =>
-    new(s.SmartRedirects, s.MaxRedirects, s.Capture, s.UpstreamProxy, s.RotatingProxy, s.FingerprintPreset, s.ForceHttp1,
+    new(s.SmartRedirects, s.MaxRedirects, s.Capture, ProxyUrl.ToDisplay(s.UpstreamProxy), s.RotatingProxy, s.FingerprintPreset, s.ForceHttp1,
         s.InterceptAllPorts, s.IgnoreUpstreamCertErrors, s.BypassHosts);
 
 // Parses a "Name: Value" per-line header block (as typed in the Requester) into

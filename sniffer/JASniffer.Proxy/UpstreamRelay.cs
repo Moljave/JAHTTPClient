@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
+using System.Runtime.InteropServices;
 using JAHTTPClient;
 using JAHTTPClient.Fingerprinting;
 using JASniffer.Core;
@@ -29,6 +30,22 @@ namespace JASniffer.Proxy;
 /// </list>
 /// </remarks>
 public sealed record ProxyTestResult(bool Ok, string? Ip = null, string? Proxy = null, string? Error = null);
+
+/// <summary>Host/engine identity captured alongside a full fingerprint scan.</summary>
+public sealed record EngineInfo(
+    string Os,
+    string Framework,
+    string OsArchitecture,
+    string ProcessArchitecture,
+    string ActivePreset,
+    bool ForceHttp1,
+    string? EgressProxy);
+
+/// <summary>A full sweep of every built-in preset's real TLS fingerprint plus engine identity.</summary>
+public sealed record FingerprintScan(
+    string GeneratedUtc,
+    EngineInfo Engine,
+    IReadOnlyList<Ja3Report> Fingerprints);
 
 public sealed class UpstreamRelay : IDisposable
 {
@@ -187,6 +204,36 @@ public sealed class UpstreamRelay : IDisposable
     /// </summary>
     public Task<Ja3Report> CaptureClientHelloAsync(CancellationToken ct)
         => Ja3SelfTest.CaptureAsync(_preset, _forceHttp1, CurrentPresetLabel, ct);
+
+    /// <summary>
+    /// Captures the real ClientHello for EVERY built-in preset over loopback in parallel and
+    /// returns each one's full fingerprint (JA3 + JA4 + parsed cipher/extension/curve/ALPN/
+    /// signature-algorithm lists) together with host/engine identity — a complete, honest
+    /// picture of every fingerprint this device can emit, taken past any TLS inspector.
+    /// </summary>
+    public async Task<FingerprintScan> CaptureAllFingerprintsAsync(CancellationToken ct)
+    {
+        var presets = new[]
+        {
+            Ja3Preset.Chrome, Ja3Preset.ChromeLatest, Ja3Preset.Edge, Ja3Preset.Firefox, Ja3Preset.Safari,
+        };
+
+        // Each self-test uses its own ephemeral loopback listener + client, so they run
+        // independently in parallel; a slow/failed one doesn't hold up the others.
+        var reports = await Task.WhenAll(
+            presets.Select(pr => Ja3SelfTest.CaptureAsync(pr, forceHttp1: false, LabelFor(pr), ct))).ConfigureAwait(false);
+
+        var engine = new EngineInfo(
+            RuntimeInformation.OSDescription,
+            RuntimeInformation.FrameworkDescription,
+            RuntimeInformation.OSArchitecture.ToString(),
+            RuntimeInformation.ProcessArchitecture.ToString(),
+            CurrentPresetLabel,
+            _forceHttp1,
+            ProxyUrl.ToDisplay(_proxyUrl));
+
+        return new FingerprintScan(DateTime.UtcNow.ToString("O"), engine, reports);
+    }
 
     /// <summary>
     /// Builds and sends a request composed in the UI's Requester through the upstream

@@ -84,6 +84,7 @@
           <button class="tab" data-tab="params">Params</button>
           <button class="tab" data-tab="cookies">Cookies</button>
           <button class="tab" data-tab="auth">Auth</button>
+          <button class="tab" data-tab="info" title="Клиент, версии, отпечатки движка, тайминги — максимально подробно">Инфо</button>
           <button class="tab" data-tab="raw">Raw</button>
           <button class="tab" data-tab="body">Body</button>
         </nav>
@@ -151,12 +152,18 @@
             <option value="Safari">Safari</option>
             <optgroup id="fpGroup" label="Захваченные"></optgroup>
           </select>
-          <div class="setting-note">TLS (JA3) + HTTP/2 отпечаток, с которым запрос уходит наверх. Смена пересоздаёт апстрим‑клиентов.</div>
+          <div class="setting-note">TLS (JA3) + HTTP/2 отпечаток, с которым запрос уходит наверх. Выберите пресет и нажмите <b>Применить</b>.</div>
+          <div class="row-buttons">
+            <button class="btn primary" id="btnApplyPreset" type="button" title="Применить выбранный отпечаток (пересоздаёт апстрим‑клиентов)">Применить</button>
+            <button class="btn" id="btnResetPreset" type="button" title="Вернуть к текущему применённому отпечатку">Сбросить</button>
+          </div>
           <div id="fpList" class="fp-list"></div>
           <div class="row-buttons">
-            <button class="btn" id="btnSelftest" type="button" title="Снять реальный ClientHello локально (мимо любых TLS-инспекторов)">Проверить отпечаток</button>
+            <button class="btn" id="btnSelftest" type="button" title="Снять реальный ClientHello локально для активного пресета (мимо любых TLS-инспекторов)">Проверить отпечаток</button>
+            <button class="btn" id="btnFullScan" type="button" title="Снять реальные отпечатки (JA3 + JA4) ВСЕХ пресетов и показать инфо об устройстве/движке">Полный скан</button>
           </div>
           <div class="setting-note" id="selftestOut"></div>
+          <div id="scanOut" class="scan-out"></div>
           <div id="fpSave" class="fp-save hidden">
             <input id="fpName" type="text" class="fp-name" placeholder="Имя снятого отпечатка" />
             <button class="btn" id="btnFpAdd" type="button" title="Сохранить снятый отпечаток в список выбора">Добавить в список</button>
@@ -183,7 +190,11 @@
             <button class="btn" id="btnTestProxy" type="button" title="Проверить прокси — покажет внешний IP">Тест</button>
           </div>
           <label class="toggle" title="Прокси меняет exit‑IP на каждый запрос (отключает пул соединений против EOF)"><input type="checkbox" id="tglRotating" /> <span>Ротационный прокси</span></label>
-          <div class="setting-note" id="proxyTestOut">Весь исходящий (апстрим) трафик идёт через прокси; расшифрованные сессии вы по‑прежнему видите. Форматы: <code>http://user:pass@ip:port</code>, <code>socks5://ip:port</code>, <code>ip:port</code>, <code>ip:port:user:pass</code>.</div>
+          <div class="row-buttons">
+            <button class="btn primary" id="btnApplyProxy" type="button" title="Применить прокси к исходящему трафику">Применить</button>
+            <button class="btn" id="btnResetProxy" type="button" title="Вернуть к текущему применённому прокси">Сбросить</button>
+          </div>
+          <div class="setting-note" id="proxyTestOut">Весь исходящий (апстрим) трафик идёт через прокси; расшифрованные сессии вы по‑прежнему видите. Форматы: <code>http://user:pass@ip:port</code>, <code>socks5://ip:port</code>, <code>ip:port</code>, <code>ip:port:user:pass</code>. Учётные данные не URL‑кодируются в поле.</div>
         </div>
 
         <div class="setting">

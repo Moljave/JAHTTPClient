@@ -109,6 +109,43 @@ public static class ProxyUrl
         return $"{scheme}://{auth}{host}:{port}";
     }
 
+    /// <summary>
+    /// Turns a canonical proxy URL (from <see cref="Normalize"/>) back into a
+    /// human-friendly form with <b>decoded</b> credentials, so the settings field shows
+    /// <c>user:p@ss@host:port</c> instead of the percent-encoded <c>user:p%40ss@host:port</c>.
+    /// The decoded form is only returned when it re-normalizes to exactly the same canonical
+    /// value (round-trip safe); otherwise the canonical form is kept, so a credential that
+    /// would be ambiguous when decoded is never corrupted.
+    /// </summary>
+    public static string? ToDisplay(string? canonical)
+    {
+        if (string.IsNullOrWhiteSpace(canonical))
+        {
+            return canonical;
+        }
+
+        try
+        {
+            var uri = new Uri(canonical);
+            var creds = string.Empty;
+            if (!string.IsNullOrEmpty(uri.UserInfo))
+            {
+                var parts = uri.UserInfo.Split(':', 2);
+                var user = Uri.UnescapeDataString(parts[0]);
+                creds = parts.Length > 1
+                    ? $"{user}:{Uri.UnescapeDataString(parts[1])}@"
+                    : $"{user}@";
+            }
+
+            var display = $"{uri.Scheme}://{creds}{uri.Host}:{uri.Port}";
+            return Normalize(display) == canonical ? display : canonical;
+        }
+        catch
+        {
+            return canonical;
+        }
+    }
+
     private static bool TrySplitHostPort(string s, out string host, out int port)
     {
         host = string.Empty;

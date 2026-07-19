@@ -7,7 +7,7 @@ using JAHTTPClient.Fingerprinting;
 
 namespace JASniffer.Proxy;
 
-/// <summary>Result of a local ClientHello self-test.</summary>
+/// <summary>Result of a local ClientHello self-test — the actual TLS fingerprint the engine emits.</summary>
 public sealed record Ja3Report(
     string Preset,
     bool Ok,
@@ -19,7 +19,19 @@ public sealed record Ja3Report(
     bool KeyShare,
     bool Grease,
     string Ja3,
-    string Ja3Md5);
+    string Ja3Md5,
+    // Deeper detail (populated on success) for the full-scan endpoint / request Info tab.
+    string Ja4 = "",
+    string? TlsVersion = null,
+    bool Sni = false,
+    bool ForceHttp1 = false,
+    int[]? Ciphers = null,
+    int[]? Extensions = null,
+    int[]? Curves = null,
+    int[]? PointFormats = null,
+    int[]? SupportedVersions = null,
+    int[]? SignatureAlgorithms = null,
+    string[]? Alpn = null);
 
 /// <summary>
 /// Captures the engine's actual TLS ClientHello over loopback and computes its
@@ -72,7 +84,7 @@ public static class Ja3SelfTest
 
         try
         {
-            return Parse(presetLabel, hello);
+            return Parse(presetLabel, hello) with { ForceHttp1 = forceHttp1 };
         }
         catch (Exception ex)
         {
@@ -156,7 +168,10 @@ public static class Ja3SelfTest
         var exts = new List<int>();
         var curves = new List<int>();
         var points = new List<int>();
-        bool tls13 = false, keyShare = false;
+        var supportedVersions = new List<int>();
+        var sigAlgs = new List<int>();
+        var alpn = new List<string>();
+        bool tls13 = false, keyShare = false, sni = false;
         for (var end = i + extTotal; i + 4 <= end;)
         {
             var t = (p[i] << 8) | p[i + 1];
@@ -167,10 +182,14 @@ public static class Ja3SelfTest
 
             switch (t)
             {
+                case 0x00: sni = true; break;            // server_name
                 case 0x2b: // supported_versions
                     for (var k = i + 1; k + 1 < i + l; k += 2)
                     {
-                        if (((p[k] << 8) | p[k + 1]) == 0x0304) tls13 = true;
+                        var vv = (p[k] << 8) | p[k + 1];
+                        if (IsGrease(vv)) continue;
+                        supportedVersions.Add(vv);
+                        if (vv == 0x0304) tls13 = true;
                     }
                     break;
                 case 0x33: keyShare = true; break;
@@ -186,6 +205,25 @@ public static class Ja3SelfTest
                     var pl = p[i];
                     for (var k = i + 1; k < i + 1 + pl; k++) points.Add(p[k]);
                     break;
+                case 0x0d: // signature_algorithms
+                    var sal = (p[i] << 8) | p[i + 1];
+                    for (var k = i + 2; k + 1 < i + 2 + sal && k + 1 < i + l; k += 2)
+                    {
+                        sigAlgs.Add((p[k] << 8) | p[k + 1]);
+                    }
+                    break;
+                case 0x10: // application_layer_protocol_negotiation (ALPN)
+                    var listLen = (p[i] << 8) | p[i + 1];
+                    var ap = i + 2;
+                    var apEnd = Math.Min(i + 2 + listLen, i + l);
+                    while (ap < apEnd)
+                    {
+                        int plen = p[ap++];
+                        if (plen <= 0 || ap + plen > apEnd) break;
+                        alpn.Add(Encoding.ASCII.GetString(p, ap, plen));
+                        ap += plen;
+                    }
+                    break;
             }
 
             i += l;
@@ -193,6 +231,50 @@ public static class Ja3SelfTest
 
         var ja3 = $"{version},{string.Join('-', ciphers)},{string.Join('-', exts)},{string.Join('-', curves)},{string.Join('-', points)}";
         var md5 = Convert.ToHexString(MD5.HashData(Encoding.ASCII.GetBytes(ja3))).ToLowerInvariant();
-        return new Ja3Report(presetLabel, true, null, p.Length, ciphers.Count, exts.Count, tls13, keyShare, greaseSeen, ja3, md5);
+        var maxVer = supportedVersions.Count > 0 ? supportedVersions.Max() : version;
+        var ja4 = ComputeJa4(maxVer, sni, ciphers, exts, alpn, sigAlgs);
+
+        return new Ja3Report(
+            presetLabel, true, null, p.Length, ciphers.Count, exts.Count, tls13, keyShare, greaseSeen, ja3, md5,
+            Ja4: ja4, TlsVersion: VersionName(maxVer), Sni: sni,
+            Ciphers: ciphers.ToArray(), Extensions: exts.ToArray(), Curves: curves.ToArray(),
+            PointFormats: points.ToArray(), SupportedVersions: supportedVersions.ToArray(),
+            SignatureAlgorithms: sigAlgs.ToArray(), Alpn: alpn.ToArray());
     }
+
+    private static string VersionName(int v) => v switch
+    {
+        0x0304 => "TLS 1.3", 0x0303 => "TLS 1.2", 0x0302 => "TLS 1.1", 0x0301 => "TLS 1.0", _ => $"0x{v:x4}",
+    };
+
+    // JA4 TLS client fingerprint (FoxIO spec): ja4_a_ja4_b_ja4_c.
+    //  a = t + tlsver + (d|i for SNI) + cipherCount(2) + extCount(2) + first/last char of first ALPN
+    //  b = sha256(sorted cipher hex list)[:12]
+    //  c = sha256(sorted ext hex list, excl. SNI(0000)+ALPN(0010), + "_" + sig-alg hex list in order)[:12]
+    private static string ComputeJa4(int maxVer, bool sni, List<int> ciphers, List<int> exts, List<string> alpn, List<int> sigAlgs)
+    {
+        var ver = maxVer switch { 0x0304 => "13", 0x0303 => "12", 0x0302 => "11", 0x0301 => "10", _ => "00" };
+        var cc = Math.Min(ciphers.Count, 99).ToString("D2");
+        var ec = Math.Min(exts.Count, 99).ToString("D2");
+        string alpnPair = "00";
+        if (alpn.Count > 0 && alpn[0].Length > 0)
+        {
+            var a = alpn[0];
+            alpnPair = $"{a[0]}{a[^1]}";
+        }
+
+        var a1 = $"t{ver}{(sni ? "d" : "i")}{cc}{ec}{alpnPair}";
+
+        var cipherHex = ciphers.Select(c => c.ToString("x4")).OrderBy(h => h, StringComparer.Ordinal);
+        var b = ciphers.Count == 0 ? "000000000000" : Sha12(string.Join(',', cipherHex));
+
+        var extHex = exts.Where(e => e is not (0x0000 or 0x0010)).Select(e => e.ToString("x4")).OrderBy(h => h, StringComparer.Ordinal);
+        var sigHex = sigAlgs.Select(s => s.ToString("x4"));
+        var c = Sha12(string.Join(',', extHex) + "_" + string.Join(',', sigHex));
+
+        return $"{a1}_{b}_{c}";
+    }
+
+    private static string Sha12(string s)
+        => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(s)))[..12].ToLowerInvariant();
 }
