@@ -36,6 +36,7 @@
     counts: $("#counts"), connDot: $("#connDot"),
     filterText: $("#filterText"), filterMethod: $("#filterMethod"),
     filterStatus: $("#filterStatus"), filterType: $("#filterType"),
+    jumpLatest: $("#jumpLatest"), capturePill: $("#capturePill"),
   };
 
   // ---- helpers -------------------------------------------------------------
@@ -58,6 +59,19 @@
 
   const shortType = (ct) => !ct ? "" : ct.split(";")[0].trim();
   const httpLabel = (v) => v && v.startsWith("2") ? "HTTP/2" : "HTTP/1.1";
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+  // Wall-clock start time HH:MM:SS for the grid; full local date/time for tooltips.
+  function clockTime(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? "" : `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+  function fullTime(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? "" : d.toLocaleString();
+  }
 
   async function api(path, opts) {
     const r = await fetch(path, opts);
@@ -144,6 +158,7 @@
     renderQueued = true;
     requestAnimationFrame(() => {
       renderQueued = false;
+      trimClientCap();
       const follow = isAtBottom();
       applyFilter();
       el.gridRows.style.height = (state.filtered.length * ROW_H) + "px";
@@ -151,11 +166,38 @@
       renderVisible();
       updateCounts();
       updateEmptyState();
+      updateFollowUi(follow);
     });
   }
 
   const isAtBottom = () =>
     el.gridScroll.scrollTop + el.gridScroll.clientHeight >= el.gridRows.offsetHeight - ROW_H * 3;
+
+  // Reflect follow-tail state: when the user has scrolled up and new rows are arriving,
+  // surface a "jump to latest" affordance; hide it while pinned to the bottom.
+  function updateFollowUi(atBottom) {
+    state.follow = atBottom;
+    el.jumpLatest.classList.toggle("show", !atBottom && state.filtered.length > 0);
+  }
+
+  function jumpToLatest() {
+    el.gridScroll.scrollTop = el.gridScroll.scrollHeight;
+    state.follow = true;
+    el.jumpLatest.classList.remove("show");
+    renderVisible();
+  }
+
+  // Defense-in-depth cap on client memory: the server evicts + broadcasts removals, but
+  // trim here too so a very long capture can never grow the tab's state without bound.
+  const CLIENT_MAX = 25000;
+  function trimClientCap() {
+    if (state.ids.length <= CLIENT_MAX) return;
+    const drop = state.ids.splice(0, state.ids.length - CLIENT_MAX);
+    for (const id of drop) {
+      state.sessions.delete(id);
+      if (state.selectedId === id) { state.selectedId = null; state.detail = null; clearInspectors(); }
+    }
+  }
 
   function renderVisible() {
     const total = state.filtered.length;
@@ -184,6 +226,7 @@
       <div class="col col-url" title="${escapeHtml(s.url)}">${escapeHtml(s.path + s.query)}</div>
       <div class="col col-type">${escapeHtml(shortType(s.responseContentType))}</div>
       <div class="col col-size">${size}</div>
+      <div class="col col-started" title="${escapeHtml(fullTime(s.startedUtc))}">${escapeHtml(clockTime(s.startedUtc))}</div>
       <div class="col col-time">${s.completed ? Math.round(s.durationMs) + "ms" : ""}</div>
     </div>`;
   }
@@ -219,9 +262,12 @@
     state.selectedId = id;
     renderVisible();
     try {
-      state.detail = await api(`/api/sessions/${id}`);
+      const d = await api(`/api/sessions/${id}`);
+      if (state.selectedId !== id) return; // a newer selection won the race — ignore this one
+      state.detail = d;
       renderInspectors();
     } catch {
+      if (state.selectedId !== id) return;
       el.reqBody.innerHTML = el.resBody.innerHTML = `<div class="empty">Сессия больше недоступна.</div>`;
     }
   }
@@ -233,7 +279,8 @@
 
     el.reqBadges.innerHTML =
       `<span class="badge b-blue">${escapeHtml(s.method)}</span>` +
-      `<span class="badge b-muted">HTTP/${escapeHtml(s.requestHttpVersion)}</span>`;
+      `<span class="badge b-muted">HTTP/${escapeHtml(s.requestHttpVersion)}</span>` +
+      (s.startedUtc ? `<span class="badge b-muted" title="Начало запроса: ${escapeHtml(fullTime(s.startedUtc))}">🕓 ${escapeHtml(clockTime(s.startedUtc))}</span>` : "");
     el.resBadges.innerHTML = responseBadgesHtml(s, d);
 
     setCount(el.reqTabs, "headers", d.requestHeaders.length);
@@ -445,14 +492,18 @@
       const row = e.target.closest(".grid-row");
       if (row) selectSession(+row.dataset.id);
     });
-    el.gridScroll.addEventListener("scroll", () => renderVisible());
+    el.gridScroll.addEventListener("scroll", () => { renderVisible(); updateFollowUi(isAtBottom()); });
 
     el.reqTabs.addEventListener("click", (e) => { if (e.target.dataset.tab) renderReqTab(e.target.dataset.tab); });
     el.resTabs.addEventListener("click", (e) => { if (e.target.dataset.tab) renderResTab(e.target.dataset.tab); });
     el.reqTabs.querySelectorAll(".tab").forEach((b) => b.dataset.label = b.textContent);
     el.resTabs.querySelectorAll(".tab").forEach((b) => b.dataset.label = b.textContent);
 
-    $("#btnClear").addEventListener("click", () => api("/api/clear", { method: "POST" }));
+    $("#btnClear").addEventListener("click", () => {
+      if (state.ids.length === 0 || confirm(`Удалить все ${state.ids.length} сессий? Это действие необратимо.`)) {
+        api("/api/clear", { method: "POST" });
+      }
+    });
     $("#btnExport").addEventListener("click", () => {
       const filtered = state.filtered.length !== state.ids.length;
       window.open("/api/export.saz" + (filtered ? "?ids=" + state.filtered.join(",") : ""), "_blank");
@@ -473,7 +524,12 @@
 
     $("#tglRedirects").addEventListener("change", saveSettings);
     $("#numMaxRedirects").addEventListener("change", saveSettings);
-    $("#tglCapture").addEventListener("change", saveSettings);
+    $("#tglCapture").addEventListener("change", async () => { await saveSettings(); syncCaptureUi(); });
+    $("#btnPause").addEventListener("click", toggleCapture);
+    el.capturePill.addEventListener("click", toggleCapture);
+    el.capturePill.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCapture(); } });
+    $("#btnTheme").addEventListener("click", toggleTheme);
+    el.jumpLatest.addEventListener("click", jumpToLatest);
     $("#modeManual").addEventListener("click", () => applyMode("manual"));
     $("#modeSystem").addEventListener("click", () => applyMode("system"));
     $("#tglUdp").addEventListener("change", onUdpToggle);
@@ -802,8 +858,12 @@
 
   async function loadRsHistory(id) {
     if (!id) return;
-    try { const d = await getJson("/api/sessions/" + id); fillResender(d); renderRsResponse(d); }
-    catch { flash("Сессия больше недоступна"); }
+    try {
+      const d = await getJson("/api/sessions/" + id);
+      if (rs("rsHistory").value !== id) return; // a newer history pick superseded this one
+      fillResender(d);
+      renderRsResponse(d);
+    } catch { flash("Сессия больше недоступна"); }
   }
 
   // Resend a captured request unchanged (new session), without opening the editor.
@@ -820,16 +880,43 @@
     } catch { flash("Запрос не удался"); }
   }
 
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+  };
+
   function initDividers() {
     drag($("#divider"), (dx, startW) => {
       const w = Math.min(window.innerWidth - 380, Math.max(320, startW + dx));
       $("#gridPane").style.width = w + "px";
+      store.set("split-grid-w", String(w));
       renderVisible();
     }, () => $("#gridPane").offsetWidth, "x");
     drag($("#inspectDivider"), (dy, startH) => {
       const h = Math.max(120, startH + dy);
       document.querySelector(".inspect.req").style.flex = `0 0 ${h}px`;
+      store.set("split-req-h", String(h));
     }, () => document.querySelector(".inspect.req").offsetHeight, "y");
+
+    // Resender's edit/response split (its DOM is static, so bind once here).
+    const rsDiv = $("#rsDivider");
+    if (rsDiv) {
+      drag(rsDiv, (dx, startW) => {
+        const total = rsDiv.parentElement.offsetWidth;
+        const w = Math.min(total - 260, Math.max(260, startW + dx));
+        document.querySelector(".resender-req").style.flex = `0 0 ${w}px`;
+      }, () => document.querySelector(".resender-req").offsetWidth, "x");
+    }
+
+    // Restore persisted sizes, re-clamped to the current viewport.
+    const savedW = parseFloat(store.get("split-grid-w"));
+    if (Number.isFinite(savedW)) {
+      $("#gridPane").style.width = Math.min(window.innerWidth - 380, Math.max(320, savedW)) + "px";
+    }
+    const savedH = parseFloat(store.get("split-req-h"));
+    if (Number.isFinite(savedH)) {
+      document.querySelector(".inspect.req").style.flex = `0 0 ${Math.max(120, savedH)}px`;
+    }
   }
 
   function drag(handle, onMove, getStart, axis) {
@@ -984,7 +1071,16 @@
   }
 
   // ---- bootstrap -----------------------------------------------------------
-  function setDot(on) { el.connDot.className = "dot " + (on ? "dot-on" : "dot-off"); }
+  const CONN = {
+    on: ["dot-on", "SignalR: подключено — идёт живой захват"],
+    reconnecting: ["dot-reconnecting", "SignalR: переподключение… захват приостановлен"],
+    off: ["dot-off", "SignalR: отключено"],
+  };
+  function setConn(status) {
+    const [cls, title] = CONN[status] || CONN.off;
+    el.connDot.className = "dot " + cls;
+    el.connDot.title = title;
+  }
 
   function connectHub() {
     const conn = new signalR.HubConnectionBuilder().withUrl("/hub/sessions").withAutomaticReconnect().build();
@@ -992,12 +1088,52 @@
     conn.on("removed", (ids) => { for (const id of ids) removeLocal(id); });
     conn.on("cleared", () => {
       state.sessions.clear(); state.ids = []; state.filtered = []; state.selectedId = null; state.detail = null;
+      // Also drop the accumulated method/content-type filter options so the dropdowns
+      // don't offer values for a capture that no longer exists.
+      state.methods.clear(); state.types.clear();
+      el.filterMethod.length = 1; el.filterType.length = 1;
+      state.filter.method = ""; state.filter.type = "";
       clearInspectors();
       scheduleRender();
     });
-    conn.onreconnected(() => setDot(true));
-    conn.onclose(() => setDot(false));
-    conn.start().then(() => setDot(true)).catch(() => { setDot(false); setTimeout(connectHub, 2000); });
+    conn.onreconnecting(() => setConn("reconnecting"));
+    conn.onreconnected(() => setConn("on"));
+    conn.onclose(() => setConn("off"));
+    conn.start().then(() => setConn("on")).catch(() => { setConn("off"); setTimeout(connectHub, 2000); });
+  }
+
+  // ---- theme (light/dark) --------------------------------------------------
+  function currentTheme() {
+    return document.documentElement.getAttribute("data-theme")
+      || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  }
+  function updateThemeButton(theme) {
+    const b = $("#btnTheme");
+    if (!b) return;
+    b.textContent = theme === "light" ? "☀️" : "🌙";
+    b.title = theme === "light" ? "Переключить на тёмную тему" : "Переключить на светлую тему";
+  }
+  function toggleTheme() {
+    const next = currentTheme() === "light" ? "dark" : "light";
+    try { localStorage.setItem("theme", next); } catch { /* private mode */ }
+    document.documentElement.setAttribute("data-theme", next);
+    updateThemeButton(next);
+  }
+
+  // ---- capture pause state (mirrored into always-visible chrome) ------------
+  function syncCaptureUi() {
+    const on = $("#tglCapture").checked;
+    el.capturePill.classList.toggle("on", !on);
+    const btn = $("#btnPause");
+    btn.textContent = on ? "⏸ Пауза" : "▶ Запись";
+    btn.classList.toggle("primary", !on);
+    btn.title = on ? "Приостановить запись сессий (Capture)" : "Возобновить запись сессий (Capture)";
+  }
+  async function toggleCapture() {
+    const cb = $("#tglCapture");
+    cb.checked = !cb.checked;
+    await saveSettings();
+    syncCaptureUi();
   }
 
   function setActiveMode(mode) {
@@ -1058,6 +1194,7 @@
       if (s.fingerprintPreset) $("#selPreset").value = s.fingerprintPreset;
       const label = $("#selPreset").selectedOptions[0]?.textContent || s.fingerprintPreset;
       if (label) $("#presetLabel").textContent = label;
+      syncCaptureUi(); // reflect persisted capture state in the toolbar (pill + Pause button)
     } catch { /* ignore */ }
   }
 
@@ -1069,6 +1206,7 @@
     } catch { /* ignore */ }
   }
 
+  updateThemeButton(currentTheme());
   wireUi();
   loadStatus();
   loadFingerprints().then(loadSettings); // options must exist before settings selects one

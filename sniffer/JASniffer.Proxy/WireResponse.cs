@@ -16,6 +16,10 @@ internal static class WireResponse
     {
         "Content-Length", "Content-Encoding", "Transfer-Encoding", "Connection", "Keep-Alive",
         "Proxy-Connection", "Proxy-Authenticate", "Upgrade", "TE", "Trailer",
+        // Alt-Svc advertises HTTP/3 (QUIC) endpoints; forwarding it invites the browser to
+        // hop to direct UDP/h3 that bypasses this TCP proxy and vanishes from the capture.
+        // Stripping it (as Fiddler/Charles do) keeps subsequent traffic inspectable.
+        "Alt-Svc",
     };
 
     public static async Task WriteAsync(Stream stream, RelayResult result, bool keepAlive, CancellationToken ct)
@@ -44,6 +48,19 @@ internal static class WireResponse
             await stream.WriteAsync(result.Body, ct).ConfigureAwait(false);
         }
 
+        await stream.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    private static readonly byte[] Continue100 = Encoding.Latin1.GetBytes("HTTP/1.1 100 Continue\r\n\r\n");
+
+    /// <summary>
+    /// Sends an interim <c>100 Continue</c> so a client using <c>Expect: 100-continue</c>
+    /// releases its request body. The proxy buffers the whole request before relaying, so
+    /// answering locally is correct and avoids the client's expect-continue stall.
+    /// </summary>
+    public static async Task WriteContinueAsync(Stream stream, CancellationToken ct)
+    {
+        await stream.WriteAsync(Continue100, ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
     }
 

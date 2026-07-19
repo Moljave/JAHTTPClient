@@ -130,6 +130,13 @@ internal sealed class Http1Reader(Stream stream)
                 return line;
             }
 
+            // Bound a single line (chunk-size / trailer) the same way the header block is
+            // bounded, so a hostile un-terminated line can't drive unbounded buffer growth.
+            if (_len - _pos > MaxHeaderBytes)
+            {
+                throw new InvalidDataException("HTTP line exceeds the maximum allowed size.");
+            }
+
             if (!await FillAsync(ct).ConfigureAwait(false))
             {
                 var tail = Encoding.Latin1.GetString(_buf, _pos, _len - _pos);

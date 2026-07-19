@@ -74,6 +74,11 @@ internal sealed class ProxyConnection(
                 return;
             }
 
+            if (request.ExpectsContinue)
+            {
+                await WireResponse.WriteContinueAsync(stream, ct).ConfigureAwait(false);
+            }
+
             request.Body = await Http1Request.ReadBodyAsync(request, reader, ct).ConfigureAwait(false);
             await ExchangeAsync(stream, request, ct).ConfigureAwait(false);
 
@@ -171,6 +176,11 @@ internal sealed class ProxyConnection(
                     // the (already-decrypted) stream straight through, uninspected.
                     await TunnelTlsAsync(tls, reader, request, host, port, ct).ConfigureAwait(false);
                     return;
+                }
+
+                if (request.ExpectsContinue)
+                {
+                    await WireResponse.WriteContinueAsync(tls, ct).ConfigureAwait(false);
                 }
 
                 request.Body = await Http1Request.ReadBodyAsync(request, reader, ct).ConfigureAwait(false);

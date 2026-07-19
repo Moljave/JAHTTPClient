@@ -4,6 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>JASniffer — Chrome-fingerprint HTTPS sniffer</title>
+  <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzRjOGJmNSIvPjx0ZXh0IHg9IjE2IiB5PSIyMiIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI4MDAiIGZpbGw9IiNmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPkpBPC90ZXh0Pjwvc3ZnPg==" />
+  <script>
+    // Apply the saved theme before first paint to avoid a flash. No saved choice → the
+    // stylesheet's prefers-color-scheme media query decides.
+    try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -17,16 +23,19 @@
     </div>
 
     <div class="toolbar-actions">
+      <span id="capturePill" class="capture-pill" role="button" tabindex="0" title="Запись приостановлена — новые сессии не сохраняются. Нажмите, чтобы возобновить.">⏸ Запись выкл</span>
       <button id="btnResender" class="btn" title="Редактировать запрос и отправить через движок с отпечатком Chrome, видя ответ рядом">⤴ Resender</button>
+      <button id="btnPause" class="btn" title="Пауза/возобновление записи сессий (Capture)">⏸ Пауза</button>
       <button id="btnClear" class="btn" title="Очистить список сессий">Clear</button>
       <button id="btnExport" class="btn" title="Экспорт сессий в архив Fiddler .saz">Export .saz</button>
       <button id="btnSettings" class="btn" title="Настройки">⚙ Settings</button>
-      <span id="connDot" class="dot dot-off" title="SignalR connection"></span>
+      <button id="btnTheme" class="btn icon" title="Переключить тему (светлая/тёмная)" aria-label="Переключить тему">🌙</button>
+      <span id="connDot" class="dot dot-off" title="SignalR: подключение…"></span>
     </div>
   </header>
 
   <div class="filterbar">
-    <input type="search" id="filterText" class="filter-input" placeholder="Фильтр по URL, host, методу, статусу или телу…" />
+    <input type="search" id="filterText" class="filter-input" placeholder="Фильтр по URL, host, методу или статусу…" />
     <select id="filterMethod" class="filter-select"><option value="">Method</option></select>
     <select id="filterStatus" class="filter-select">
       <option value="">Status</option>
@@ -50,11 +59,13 @@
         <div class="col col-url">URL</div>
         <div class="col col-type">Type</div>
         <div class="col col-size">Size</div>
-        <div class="col col-time">Time</div>
+        <div class="col col-started" title="Время начала запроса">Started</div>
+        <div class="col col-time" title="Длительность (round-trip)">Dur</div>
       </div>
       <div class="grid-scroll" id="gridScroll">
         <div class="grid-rows" id="gridRows"></div>
         <div id="gridEmpty" class="grid-empty hidden"></div>
+        <button id="jumpLatest" class="jump-latest" title="Прокрутить к последним и следить за хвостом">↓ Новые</button>
       </div>
     </section>
 
@@ -192,6 +203,17 @@
           <div class="setting-note" id="caStoreInfo"></div>
           <div class="setting-note" id="caAndroidInfo"></div>
         </div>
+
+        <div class="setting">
+          <div class="setting-label">Горячие клавиши</div>
+          <div class="shortcuts">
+            <span class="sc-keys"><kbd>↑</kbd><kbd>↓</kbd></span><span class="sc-desc">навигация по сессиям</span>
+            <span class="sc-keys"><kbd>Del</kbd></span><span class="sc-desc">удалить выбранную сессию</span>
+            <span class="sc-keys"><kbd>/</kbd><span>или</span><kbd>Ctrl</kbd><kbd>F</kbd></span><span class="sc-desc">перейти в фильтр</span>
+            <span class="sc-keys"><kbd>Esc</kbd></span><span class="sc-desc">закрыть модалку / меню</span>
+            <span class="sc-keys">ПКМ</span><span class="sc-desc">контекстное меню по строке</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -234,7 +256,7 @@
           <div class="setting-note" id="rsStatus">Правьте запрос и нажмите Send — ответ появится справа.</div>
         </section>
 
-        <div class="resender-vdiv"></div>
+        <div class="resender-vdiv" id="rsDivider" title="Потяните, чтобы изменить размер панелей"></div>
 
         <!-- right: response viewer -->
         <section class="resender-res">

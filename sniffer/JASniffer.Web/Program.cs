@@ -209,10 +209,10 @@ api.MapPost("/compose", async (ComposeRequest body, UpstreamRelay relay, Session
     {
         var headers = ParseHeaderBlock(body.Headers);
         byte[] payload = string.IsNullOrEmpty(body.Body) ? [] : System.Text.Encoding.UTF8.GetBytes(body.Body);
-        var id = await relay.ComposeAsync(store, body.Method ?? "GET", body.Url!, headers, payload, ct);
-        // Return the full detail so the Resender can show the response in one round-trip.
-        var session = store.Get(id);
-        return session is null ? Results.Ok(new { id }) : Results.Ok(DtoMapper.ToDetail(session));
+        var session = await relay.ComposeAsync(store, body.Method ?? "GET", body.Url!, headers, payload, ct);
+        // Return the full detail so the Resender can show the response in one round-trip —
+        // independent of the Capture toggle (the session may not be retained in the store).
+        return Results.Ok(DtoMapper.ToDetail(session));
     }
     catch (Exception ex)
     {
@@ -275,6 +275,14 @@ app.Lifetime.ApplicationStarted.Register(() =>
     log.LogInformation("Root CA         : {Subject}", ca.Subject);
     log.LogInformation("CA store        : {Dir} (install rootCA.cer as a trusted root, or use the UI button)", CertificateAuthority.DefaultStoreDirectory);
     BrowserLauncher.Open(uiUrl);
+});
+
+// Restore the OS proxy on shutdown so exiting while in System mode never leaves the
+// system proxy pointed at this (now dead) port. No-op if we didn't enable it.
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    try { app.Services.GetRequiredService<SystemProxy>().Disable(); }
+    catch { /* best effort — never block shutdown */ }
 });
 
 app.Run();

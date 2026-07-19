@@ -32,6 +32,9 @@ internal sealed class ProxyRequest
     /// <summary>Browser asked to close the connection after this exchange.</summary>
     public bool WantsClose { get; init; }
 
+    /// <summary>Client sent <c>Expect: 100-continue</c> with a body and is withholding it until it receives an interim 100.</summary>
+    public bool ExpectsContinue { get; init; }
+
     /// <summary>Reconstructs the raw request bytes (request line + headers + CRLFCRLF + body) for tunneling.</summary>
     public byte[] ToRawBytes()
     {

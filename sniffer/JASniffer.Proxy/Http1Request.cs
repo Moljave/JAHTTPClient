@@ -89,6 +89,7 @@ internal static class Http1Request
             IsUpgrade = DetectUpgrade(headers),
             IsEventStream = DetectEventStream(headers),
             WantsClose = DetectClose(headers, version),
+            ExpectsContinue = DetectExpectContinue(headers) && DetectHasBody(headers),
         };
     }
 
@@ -177,6 +178,26 @@ internal static class Http1Request
     {
         var accept = Header(headers, "Accept");
         return accept is not null && accept.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool DetectExpectContinue(List<HeaderEntry> headers)
+    {
+        var expect = Header(headers, "Expect");
+        return expect is not null && expect.Contains("100-continue", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // True when the request declares a body (chunked framing or a positive Content-Length),
+    // so a 100-continue is only sent when the client actually has a body to release.
+    private static bool DetectHasBody(List<HeaderEntry> headers)
+    {
+        var te = Header(headers, "Transfer-Encoding");
+        if (te is not null && te.Contains("chunked", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var cl = Header(headers, "Content-Length");
+        return cl is not null && long.TryParse(cl.Trim(), out var len) && len > 0;
     }
 
     private static bool DetectClose(List<HeaderEntry> headers, string version)

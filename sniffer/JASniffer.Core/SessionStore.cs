@@ -36,14 +36,26 @@ public sealed class SessionStore(SnifferSettings settings)
             return;
         }
 
+        List<CapturedSession>? evicted = null;
         lock (_gate)
         {
             _byId[session.Id] = session;
             _order.Enqueue(session.Id);
-            Evict_NoLock();
+            Evict_NoLock(ref evicted);
         }
 
         SessionChanged?.Invoke(session, SessionChangeKind.Added);
+
+        // Announce ring evictions OUTSIDE the lock so every connected UI prunes the evicted
+        // rows in lockstep with the server — otherwise clients keep ghost rows that 404 on
+        // click and a session count that grows past the server's live set.
+        if (evicted is not null)
+        {
+            foreach (var old in evicted)
+            {
+                SessionChanged?.Invoke(old, SessionChangeKind.Removed);
+            }
+        }
     }
 
     /// <summary>Signals that an already-added session was mutated (response/error recorded).</summary>
@@ -127,11 +139,14 @@ public sealed class SessionStore(SnifferSettings settings)
         SessionChanged?.Invoke(null!, SessionChangeKind.Cleared);
     }
 
-    private void Evict_NoLock()
+    private void Evict_NoLock(ref List<CapturedSession>? evicted)
     {
         while (_order.Count > _settings.MaxSessions && _order.TryDequeue(out var oldest))
         {
-            _byId.Remove(oldest);
+            if (_byId.Remove(oldest, out var removed))
+            {
+                (evicted ??= []).Add(removed);
+            }
         }
     }
 }

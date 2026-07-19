@@ -34,6 +34,14 @@ public sealed partial class SystemProxy(ILogger<SystemProxy> logger)
             return false;
         }
 
+        // Idempotent: a repeat enable must NOT re-capture the registry — the current values
+        // are already ours (127.0.0.1:<port>), so re-saving them would overwrite the real
+        // originals and later restore the OS proxy to this dead port instead of the user's.
+        if (_enabledByUs)
+        {
+            return true;
+        }
+
         try
         {
             EnableWindows(proxyPort);

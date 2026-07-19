@@ -33,9 +33,16 @@ public sealed record ProxyTestResult(bool Ok, string? Ip = null, string? Proxy =
 public sealed class UpstreamRelay : IDisposable
 {
     // Content headers must live on HttpContent, not the request; Content-Length is
-    // recomputed by ByteArrayContent, so it is never forwarded verbatim.
+    // recomputed by ByteArrayContent, so it is never forwarded verbatim. Transfer-Encoding
+    // and TE describe framing the relay already resolved (the body is de-chunked and
+    // re-framed with Content-Length), and Expect: 100-continue is answered by the proxy
+    // itself before the body is read — all three are hop-by-hop and must not be forwarded.
     private static readonly HashSet<string> SkippedRequestHeaders =
-        new(StringComparer.OrdinalIgnoreCase) { "Host", "Content-Length", "Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authorization" };
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Host", "Content-Length", "Connection", "Keep-Alive", "Proxy-Connection",
+            "Proxy-Authorization", "Transfer-Encoding", "TE", "Expect",
+        };
 
     private readonly SnifferSettings _settings;
     private readonly FingerprintStore _fingerprints;
@@ -183,9 +190,11 @@ public sealed class UpstreamRelay : IDisposable
 
     /// <summary>
     /// Builds and sends a request composed in the UI's Requester through the upstream
-    /// client (current fingerprint/settings), recording it as a session. Returns its id.
+    /// client (current fingerprint/settings), recording it as a session. Returns the fully
+    /// populated session so the Resender always gets the response — even when capture is
+    /// off and the session is therefore not retained in the store.
     /// </summary>
-    public async Task<int> ComposeAsync(
+    public async Task<CapturedSession> ComposeAsync(
         SessionStore store, string method, string url, IReadOnlyList<HeaderEntry> headers, byte[] body, CancellationToken ct)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
@@ -228,7 +237,7 @@ public sealed class UpstreamRelay : IDisposable
         store.Add(session);
         await RelayAsync(request, session, ct).ConfigureAwait(false);
         store.Update(session);
-        return session.Id;
+        return session;
     }
 
     /// <summary>
@@ -248,7 +257,12 @@ public sealed class UpstreamRelay : IDisposable
         }
 
         session.FollowedRedirects = follow;
-        session.HostIp = ResolveHostIp(request.Host);
+
+        // Resolve the host IP off the critical path: it is purely informational (shown in
+        // the UI / .saz export), so run the lookup concurrently with the request instead of
+        // blocking before it, and skip it entirely under an egress proxy, where a locally
+        // resolved IP is both unused and misleading (the proxy resolves at its own exit).
+        var ipTask = _proxyUrl is null ? ResolveHostIpAsync(request.Host, ct) : Task.FromResult<string?>(null);
 
         var sw = Stopwatch.StartNew();
         try
@@ -258,11 +272,13 @@ public sealed class UpstreamRelay : IDisposable
             var body = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             sw.Stop();
 
+            session.HostIp = await ipTask.ConfigureAwait(false);
             return RecordSuccess(request, session, response, body, sw.Elapsed.TotalMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
+            session.HostIp = await ipTask.ConfigureAwait(false);
             session.DurationMs = sw.Elapsed.TotalMilliseconds;
             session.Completed = true;
             session.UpstreamOk = false;
@@ -310,10 +326,15 @@ public sealed class UpstreamRelay : IDisposable
     {
         var message = new HttpRequestMessage(new HttpMethod(request.Method), request.Url);
 
-        byte[]? body = request.Body.Length > 0 ? request.Body : null;
-        if (body is not null)
+        // Attach a body whenever the request has one, OR when it carries a real content
+        // header (e.g. an empty POST with Content-Type: application/json) — otherwise those
+        // headers would be silently dropped, since content headers can only live on
+        // HttpContent. Content-Length alone doesn't count (it's recomputed and skipped).
+        var hasContentHeaders = request.Headers.Any(h =>
+            IsContentHeader(h.Name) && !SkippedRequestHeaders.Contains(h.Name));
+        if (request.Body.Length > 0 || hasContentHeaders)
         {
-            message.Content = new ByteArrayContent(body);
+            message.Content = new ByteArrayContent(request.Body);
             message.Content.Headers.Clear();
         }
 
@@ -402,7 +423,7 @@ public sealed class UpstreamRelay : IDisposable
         }
     }
 
-    private string? ResolveHostIp(string host)
+    private async Task<string?> ResolveHostIpAsync(string host, CancellationToken ct)
     {
         // Only successful lookups are cached: caching a null would let one transient DNS
         // failure blank a host's IP for the whole process lifetime.
@@ -418,7 +439,8 @@ public sealed class UpstreamRelay : IDisposable
 
         try
         {
-            var addrs = Dns.GetHostAddresses(host);
+            // Async so the lookup never blocks a thread-pool thread while it runs.
+            var addrs = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
             if (addrs.Length > 0)
             {
                 return _hostIpCache[host] = addrs[0].ToString();
@@ -426,7 +448,7 @@ public sealed class UpstreamRelay : IDisposable
         }
         catch (Exception)
         {
-            // Transient/unresolvable — leave it uncached so a later request retries.
+            // Transient/unresolvable/cancelled — leave it uncached so a later request retries.
         }
 
         return null;
