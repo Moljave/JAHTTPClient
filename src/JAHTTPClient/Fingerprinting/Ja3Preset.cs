@@ -20,4 +20,7 @@ public enum Ja3Preset
 
     /// <summary>Safari on macOS.</summary>
     Safari,
+
+    /// <summary>Chrome on Android (mobile UA, sec-ch-ua-mobile: ?1). TLS profile is chrome_133 — same BoringSSL stack as Chrome 133 Android.</summary>
+    AndroidChrome,
 }

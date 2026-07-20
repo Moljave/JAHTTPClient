@@ -64,6 +64,7 @@ public static class FingerprintProfiles
             Ja3Preset.Edge => Edge(),
             Ja3Preset.Firefox => Firefox(),
             Ja3Preset.Safari => Safari(),
+            Ja3Preset.AndroidChrome => AndroidChrome133(),
             _ => Chrome148(),
         };
 
@@ -111,5 +112,20 @@ public static class FingerprintProfiles
         SecChUa: string.Empty,
         SecChUaMobile: string.Empty,
         SecChUaPlatform: string.Empty,
+        HeaderOrder: ChromeHeaderOrder);
+
+    // Chrome 133 on Android. Uses the same chrome_133 BoringSSL TLS stack (X25519MLKEM768,
+    // ECH, cipher/extension order) with mobile UA and sec-ch-ua-mobile: ?1 so the HTTP
+    // layer matches what the browser actually sends on the JA3 captured below.
+    // JA3 (captured from tls.peet.ws on Android Chrome):
+    //   05d763dd92dbfd8857b606c7ee5279ba
+    //   771,4865-4867-4866-49195-49199-52393-52392-49196-49200-49162-49161-49171-49172-156-157-47-53,
+    //   27-13-23-18-11-51-10-16-28-5-65037-34-43-0-65281,4588-29-23-24-25-256-257,0
+    private static FingerprintProfile AndroidChrome133() => new(
+        TlsIdentifier: "chrome_133",
+        UserAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36",
+        SecChUa: "\"Chromium\";v=\"133\", \"Google Chrome\";v=\"133\", \"Not/A)Brand\";v=\"99\"",
+        SecChUaMobile: "?1",
+        SecChUaPlatform: "\"Android\"",
         HeaderOrder: ChromeHeaderOrder);
 }

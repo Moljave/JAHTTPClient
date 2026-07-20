@@ -195,6 +195,7 @@ public sealed class UpstreamRelay : IDisposable
         Ja3Preset.Edge => "Edge",
         Ja3Preset.Firefox => "Firefox",
         Ja3Preset.Safari => "Safari",
+        Ja3Preset.AndroidChrome => "Chrome Android 133",
         _ => preset.ToString(),
     };
 
@@ -215,7 +216,7 @@ public sealed class UpstreamRelay : IDisposable
     {
         var presets = new[]
         {
-            Ja3Preset.Chrome, Ja3Preset.ChromeLatest, Ja3Preset.Edge, Ja3Preset.Firefox, Ja3Preset.Safari,
+            Ja3Preset.Chrome, Ja3Preset.ChromeLatest, Ja3Preset.Edge, Ja3Preset.Firefox, Ja3Preset.Safari, Ja3Preset.AndroidChrome,
         };
 
         // Each self-test uses its own ephemeral loopback listener + client, so they run
