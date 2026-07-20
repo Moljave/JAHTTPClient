@@ -17,7 +17,7 @@ var caDir = builder.Configuration.GetValue<string?>("JASniffer:CaDirectory", nul
 builder.WebHost.UseUrls($"http://localhost:{uiPort}");
 
 // ---- services --------------------------------------------------------------
-var settings = new SnifferSettings { SelfUiPort = uiPort };
+var settings = new SnifferSettings { SelfUiPort = uiPort, ProxyPort = proxyPort };
 var settingsPath = Path.Combine(caDir ?? CertificateAuthority.DefaultStoreDirectory, "settings.json");
 SettingsFile.Apply(settings, settingsPath); // restore persisted preset/redirects/etc.
 builder.Services.AddSingleton(settings);

@@ -157,4 +157,12 @@ public sealed class SnifferSettings
     /// when the system proxy doesn't bypass loopback.
     /// </summary>
     public int SelfUiPort { get; init; }
+
+    /// <summary>
+    /// The MITM proxy's own loopback port. Used so the proxy can self-serve a few
+    /// diagnostics (the fingerprint scan/self-test) when a browser navigates directly
+    /// to <c>http://127.0.0.1:{ProxyPort}/api/fingerprint-scan</c>, instead of trying
+    /// to relay that request back to itself.
+    /// </summary>
+    public int ProxyPort { get; init; }
 }

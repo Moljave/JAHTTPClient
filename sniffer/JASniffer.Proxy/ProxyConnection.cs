@@ -3,6 +3,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using JASniffer.Core;
 using JASniffer.Core.Certificates;
@@ -71,6 +72,15 @@ internal sealed class ProxyConnection(
                 // and can't be buffered, so hand the whole conversation to a raw TCP tunnel
                 // (mirrors the HTTPS path in PumpMitmAsync).
                 await TunnelPlainAsync(stream, reader, request, ct).ConfigureAwait(false);
+                return;
+            }
+
+            // A request addressed to the proxy's OWN loopback port (e.g. navigating to
+            // http://127.0.0.1:8866/api/fingerprint-scan) is answered by the proxy itself
+            // rather than relayed back to itself.
+            if (IsProxySelfDiag(request))
+            {
+                await ServeSelfDiagAsync(stream, request, ct).ConfigureAwait(false);
                 return;
             }
 
@@ -222,14 +232,63 @@ internal sealed class ProxyConnection(
 
     /// <summary>True for loopback traffic to the sniffer's own UI port — proxied, never recorded.</summary>
     private bool IsSelfUi(string host, int port)
+        => settings.SelfUiPort != 0 && port == settings.SelfUiPort && IsLoopbackHost(host);
+
+    private static bool IsLoopbackHost(string host)
+        => host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+           || (IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip));
+
+    private static readonly JsonSerializerOptions SelfDiagJson =
+        new(JsonSerializerDefaults.Web) { WriteIndented = true };
+
+    /// <summary>
+    /// True for a GET addressed to the proxy's OWN loopback port on a self-served diagnostic
+    /// path — so <c>http://127.0.0.1:{ProxyPort}/api/fingerprint-scan</c> (or
+    /// <c>/api/fingerprint-selftest</c>) is answered locally instead of relayed to itself.
+    /// </summary>
+    private bool IsProxySelfDiag(ProxyRequest request)
     {
-        if (settings.SelfUiPort == 0 || port != settings.SelfUiPort)
+        if (settings.ProxyPort == 0 || request.Port != settings.ProxyPort)
         {
             return false;
         }
 
-        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip));
+        if (!request.Method.Equals("GET", StringComparison.OrdinalIgnoreCase) || !IsLoopbackHost(request.Host))
+        {
+            return false;
+        }
+
+        return request.Path.StartsWith("/api/fingerprint-scan", StringComparison.OrdinalIgnoreCase)
+            || request.Path.StartsWith("/api/fingerprint-selftest", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Runs the requested fingerprint diagnostic in-engine and writes it back as JSON, so the
+    /// scan/self-test is reachable straight from the proxy port without opening the UI.
+    /// </summary>
+    private async Task ServeSelfDiagAsync(Stream stream, ProxyRequest request, CancellationToken ct)
+    {
+        try
+        {
+            object payload;
+            if (request.Path.StartsWith("/api/fingerprint-selftest", StringComparison.OrdinalIgnoreCase))
+            {
+                payload = await relay.CaptureClientHelloAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                payload = await relay.CaptureAllFingerprintsAsync(ct).ConfigureAwait(false);
+            }
+
+            var body = JsonSerializer.SerializeToUtf8Bytes(payload, SelfDiagJson);
+            await WireResponse.WriteInlineAsync(stream, 200, "OK", "application/json; charset=utf-8", body, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Self-served fingerprint diagnostic failed for {Path}.", request.Path);
+            var body = Encoding.UTF8.GetBytes($"{{\"ok\":false,\"error\":{JsonSerializer.Serialize(ex.Message)}}}");
+            await WireResponse.WriteInlineAsync(stream, 500, "Internal Server Error", "application/json; charset=utf-8", body, ct).ConfigureAwait(false);
+        }
     }
 
     private CapturedSession NewSession(ProxyRequest request)

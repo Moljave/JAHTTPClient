@@ -64,6 +64,29 @@ internal static class WireResponse
         await stream.FlushAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Writes a complete self-generated response (status line + headers + body) on the
+    /// browser leg — used when the proxy answers a request itself (e.g. self-served
+    /// diagnostics) rather than relaying it. Always closes the connection afterwards.
+    /// </summary>
+    public static async Task WriteInlineAsync(Stream stream, int status, string reason, string contentType, byte[] body, CancellationToken ct)
+    {
+        var head = new StringBuilder();
+        head.Append("HTTP/1.1 ").Append(status).Append(' ').Append(reason).Append("\r\n");
+        head.Append("Content-Type: ").Append(contentType).Append("\r\n");
+        head.Append("Content-Length: ").Append(body.Length).Append("\r\n");
+        head.Append("Cache-Control: no-store\r\n");
+        head.Append("Connection: close\r\n\r\n");
+
+        await stream.WriteAsync(Encoding.Latin1.GetBytes(head.ToString()), ct).ConfigureAwait(false);
+        if (body.Length > 0)
+        {
+            await stream.WriteAsync(body, ct).ConfigureAwait(false);
+        }
+
+        await stream.FlushAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>Writes a small plain-text status line response (used for proxy-level errors).</summary>
     public static async Task WriteStatusAsync(Stream stream, int status, string reason, string? body, CancellationToken ct)
     {
