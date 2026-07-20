@@ -51,7 +51,7 @@ public sealed class CustomTlsClient
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? KeyShareCurves { get; set; }
 
-    [JsonPropertyName("certCompressionAlgo")]
+    [JsonPropertyName("certCompressionAlgos")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CertCompressionAlgo { get; set; }
 
