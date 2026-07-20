@@ -49,7 +49,15 @@ public static class Ja3SelfTest
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        var capture = AcceptHelloAsync(listener, ct);
+        // Bound the whole capture. If the engine never dials loopback — e.g. it fails to build
+        // the ClientHello for a custom preset (Android Chrome) and errors before connecting —
+        // AcceptSocketAsync would otherwise wait forever and hang the self-test/scan endpoint
+        // (and any caller that awaits it). Cancel the accept after a few seconds, or as soon as
+        // the send finishes without a connection, so this ALWAYS returns.
+        using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        acceptCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        var capture = AcceptHelloAsync(listener, acceptCts.Token);
         var client = new TlsClientChromeHttpClient(new ChromeHttpClientOptions
         {
             EnableJa3Fingerprinting = true,
@@ -64,7 +72,13 @@ public static class Ja3SelfTest
         // which we read. The handshake never completes (we don't reply), so the
         // request fails — that's fine, we only wanted the ClientHello.
         var send = Task.Run(() => client.SendAsync(new HttpRequestMessage(HttpMethod.Get, $"https://127.0.0.1:{port}/"), ct), ct);
-        _ = send.ContinueWith(static t => { _ = t.Exception; }, TaskScheduler.Default);
+        _ = send.ContinueWith(t =>
+        {
+            _ = t.Exception; // observe; the handshake is expected to fail
+            // Unblock the accept the moment the engine gives up (build/connect error) so a
+            // failing preset returns in ~seconds instead of waiting out the full timeout.
+            try { acceptCts.Cancel(); } catch { /* already cancelled/disposed */ }
+        }, TaskScheduler.Default);
 
         byte[] hello;
         try
@@ -79,7 +93,7 @@ public static class Ja3SelfTest
 
         if (hello.Length < 50 || hello[0] != 0x16)
         {
-            return new Ja3Report(presetLabel, false, "ClientHello не получен (порт занят?)", hello.Length, 0, 0, false, false, false, string.Empty, string.Empty);
+            return new Ja3Report(presetLabel, false, "ClientHello не получен (движок не подключился — таймаут или ошибка сборки отпечатка)", hello.Length, 0, 0, false, false, false, string.Empty, string.Empty);
         }
 
         try
