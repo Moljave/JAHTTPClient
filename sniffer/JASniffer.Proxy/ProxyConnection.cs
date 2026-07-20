@@ -124,6 +124,14 @@ internal sealed class ProxyConnection(
         await stream.WriteAsync(Encoding.Latin1.GetBytes("HTTP/1.1 200 Connection Established\r\n\r\n"), ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
 
+        // CONNECT to the proxy's own loopback port: read the inner request on the
+        // plain (non-TLS) stream and self-serve diagnostics without a TLS handshake.
+        if (IsLoopbackHost(host) && port == settings.ProxyPort && settings.ProxyPort != 0)
+        {
+            await ServeSelfDiagFromTunnelAsync(stream, ct).ConfigureAwait(false);
+            return;
+        }
+
         if (settings.IsBypassed(host) || (!MitmPorts.Contains(port) && !settings.InterceptAllPorts))
         {
             // Pass-through (bypass list, or a non-HTTP port with all-port interception off):
@@ -185,6 +193,12 @@ internal sealed class ProxyConnection(
                     // WebSocket/SSE inside TLS: re-establish TLS to the origin and pass
                     // the (already-decrypted) stream straight through, uninspected.
                     await TunnelTlsAsync(tls, reader, request, host, port, ct).ConfigureAwait(false);
+                    return;
+                }
+
+                if (IsProxySelfDiag(request))
+                {
+                    await ServeSelfDiagAsync(tls, request, ct).ConfigureAwait(false);
                     return;
                 }
 
@@ -258,8 +272,7 @@ internal sealed class ProxyConnection(
             return false;
         }
 
-        return request.Path.StartsWith("/api/fingerprint-scan", StringComparison.OrdinalIgnoreCase)
-            || request.Path.StartsWith("/api/fingerprint-selftest", StringComparison.OrdinalIgnoreCase);
+        return IsSelfDiagPath(request.Path);
     }
 
     /// <summary>
@@ -290,6 +303,45 @@ internal sealed class ProxyConnection(
             await WireResponse.WriteInlineAsync(stream, 500, "Internal Server Error", "application/json; charset=utf-8", body, ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Handles a CONNECT tunnel to the proxy's own port: reads the first inner HTTP
+    /// request on the raw (non-TLS) stream and serves diagnostics if it matches, or
+    /// returns 404. This avoids a pointless TLS handshake for self-targeted CONNECT.
+    /// </summary>
+    private async Task ServeSelfDiagFromTunnelAsync(Stream stream, CancellationToken ct)
+    {
+        var reader = new Http1Reader(stream);
+        var head = await reader.ReadHeaderBlockAsync(ct).ConfigureAwait(false);
+        if (head is null)
+        {
+            return;
+        }
+
+        // We already know from the CONNECT target that this is the proxy's own port,
+        // so parse with the known authority to avoid port-mismatch when the inner Host
+        // header omits the port (origin-form defaults to 80).
+        var request = Http1Request.Parse(head, secure: false,
+            tunnelHost: "127.0.0.1", tunnelPort: settings.ProxyPort);
+        if (request is null)
+        {
+            await WireResponse.WriteStatusAsync(stream, 400, "Bad Request", null, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (IsSelfDiagPath(request.Path) && request.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+        {
+            await ServeSelfDiagAsync(stream, request, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await WireResponse.WriteStatusAsync(stream, 404, "Not Found", "This proxy port only self-serves /api/fingerprint-scan and /api/fingerprint-selftest.", ct).ConfigureAwait(false);
+        }
+    }
+
+    private static bool IsSelfDiagPath(string path)
+        => path.StartsWith("/api/fingerprint-scan", StringComparison.OrdinalIgnoreCase)
+           || path.StartsWith("/api/fingerprint-selftest", StringComparison.OrdinalIgnoreCase);
 
     private CapturedSession NewSession(ProxyRequest request)
     {
