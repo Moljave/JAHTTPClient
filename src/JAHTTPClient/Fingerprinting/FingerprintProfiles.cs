@@ -1,3 +1,5 @@
+using JAHTTPClient.Interop;
+
 namespace JAHTTPClient.Fingerprinting;
 
 /// <summary>
@@ -12,7 +14,17 @@ public sealed record FingerprintProfile(
     string SecChUa,
     string SecChUaMobile,
     string SecChUaPlatform,
-    IReadOnlyList<string> HeaderOrder);
+    IReadOnlyList<string> HeaderOrder)
+{
+    /// <summary>
+    /// When set, the native request uses a fully custom TLS+H2 specification
+    /// instead of a named <see cref="TlsIdentifier"/> profile. The <see cref="TlsIdentifier"/>
+    /// is ignored in this case. Use for presets where no built-in identifier matches
+    /// (e.g. Chrome Android, which differs from desktop Chrome in cipher order, H2
+    /// window size, and pseudo-header order).
+    /// </summary>
+    public CustomTlsClient? CustomTlsSpec { get; init; }
+}
 
 /// <summary>Resolves a <see cref="Ja3Preset"/> to a concrete <see cref="FingerprintProfile"/>.</summary>
 public static class FingerprintProfiles
@@ -114,18 +126,44 @@ public static class FingerprintProfiles
         SecChUaPlatform: string.Empty,
         HeaderOrder: ChromeHeaderOrder);
 
-    // Chrome 133 on Android. Uses the same chrome_133 BoringSSL TLS stack (X25519MLKEM768,
-    // ECH, cipher/extension order) with mobile UA and sec-ch-ua-mobile: ?1 so the HTTP
-    // layer matches what the browser actually sends on the JA3 captured below.
-    // JA3 (captured from tls.peet.ws on Android Chrome):
-    //   05d763dd92dbfd8857b606c7ee5279ba
-    //   771,4865-4867-4866-49195-49199-52393-52392-49196-49200-49162-49161-49171-49172-156-157-47-53,
-    //   27-13-23-18-11-51-10-16-28-5-65037-34-43-0-65281,4588-29-23-24-25-256-257,0
+    // Chrome 133 on Android. Uses CustomTlsSpec with the EXACT ClientHello captured from
+    // a real Android Chrome (tls.peet.ws), since Android Chrome differs from desktop:
+    //   • Cipher order: 4866 (CHACHA) before 4867 (AES-256) — opposite of desktop
+    //   • Extra ECDSA-CBC ciphers (49162, 49161) not in desktop
+    //   • 7 curves instead of 4 (P-521, ffdhe2048, ffdhe3072)
+    //   • Extensions: record_size_limit(28), delegated_credentials(34) present;
+    //     no session_ticket(35)/psk_key_exchange_modes(45)/application_settings(17613)
+    //   • H2: INITIAL_WINDOW_SIZE=131072 (128KB vs desktop 6MB), pseudo-order m,p,a,s
+    //   • No GREASE in supported_versions or curves
+    // JA3: 05d763dd92dbfd8857b606c7ee5279ba
     private static FingerprintProfile AndroidChrome133() => new(
-        TlsIdentifier: "chrome_133",
+        TlsIdentifier: string.Empty,
         UserAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36",
         SecChUa: "\"Chromium\";v=\"133\", \"Google Chrome\";v=\"133\", \"Not/A)Brand\";v=\"99\"",
         SecChUaMobile: "?1",
         SecChUaPlatform: "\"Android\"",
-        HeaderOrder: ChromeHeaderOrder);
+        HeaderOrder: ChromeHeaderOrder)
+    {
+        CustomTlsSpec = new CustomTlsClient
+        {
+            Ja3String = "771,4865-4867-4866-49195-49199-52393-52392-49196-49200-49162-49161-49171-49172-156-157-47-53,27-13-23-18-11-51-10-16-28-5-65037-34-43-0-65281,4588-29-23-24-25-256-257,0",
+            // H2 SETTINGS: Akamai fingerprint 1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s
+            H2Settings = new Dictionary<string, int>
+            {
+                ["HEADER_TABLE_SIZE"] = 65536,
+                ["ENABLE_PUSH"] = 0,
+                ["INITIAL_WINDOW_SIZE"] = 131072,
+                ["MAX_HEADER_LIST_SIZE"] = 16384,
+            },
+            H2SettingsOrder = ["HEADER_TABLE_SIZE", "ENABLE_PUSH", "INITIAL_WINDOW_SIZE", "MAX_HEADER_LIST_SIZE"],
+            ConnectionFlow = 12517377,
+            // Android Chrome uses :method,:path,:authority,:scheme — desktop uses m,a,s,p
+            PseudoHeaderOrder = [":method", ":path", ":authority", ":scheme"],
+            // Only X25519MLKEM768 + X25519 actually send key material (supported_groups has 7)
+            KeyShareCurves = ["X25519MLKEM768", "X25519"],
+            SupportedVersions = ["TLSv1.3", "TLSv1.2"],
+            CertCompressionAlgo = "brotli",
+            AlpnProtocols = ["h2", "http/1.1"],
+        },
+    };
 }

@@ -209,13 +209,15 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
         bool isByteBody)
     {
         var merged = NormalizeHeaders(MergeFingerprintHeaders(uri, headers), _options.ForceHttp1);
+        var hasCustom = _profile.CustomTlsSpec is not null;
 
         return new TlsRequestPayload
         {
             SessionId = _sessionId,
-            // The native library always needs a profile; impersonation toggles
-            // the client hints and ClientHello extension shuffling, not the base.
-            TlsClientIdentifier = _profile.TlsIdentifier,
+            // Named profile OR a fully custom TLS/H2 spec — mutually exclusive in the native API.
+            // Custom profiles pin the exact ClientHello, so extension-order shuffling is disabled.
+            TlsClientIdentifier = hasCustom ? null : _profile.TlsIdentifier,
+            CustomTlsClient = _profile.CustomTlsSpec,
             RequestUrl = uri.AbsoluteUri,
             RequestMethod = method.Method,
             RequestBody = body,
@@ -232,7 +234,9 @@ public sealed class TlsClientChromeHttpClient : ChromeHttpClient
             // cookies across hops in request-scoped managed state instead.
             WithDefaultCookieJar = !(_options.WithoutCookieJar || _options.IsolateRedirectCookies),
             WithoutCookieJar = _options.WithoutCookieJar || _options.IsolateRedirectCookies,
-            WithRandomTlsExtensionOrder = _options.EnableJa3Fingerprinting,
+            // Don't shuffle extensions for custom profiles — the exact order is already pinned
+            // in the JA3 string and the native library respects it for customTlsClient.
+            WithRandomTlsExtensionOrder = _options.EnableJa3Fingerprinting && !hasCustom,
             ForceHttp1 = _options.ForceHttp1,
             TimeoutMilliseconds = (int)Math.Clamp(_options.Timeout.TotalMilliseconds, 1, int.MaxValue),
             ProxyUrl = _proxy,
