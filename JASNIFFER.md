@@ -127,7 +127,7 @@ dotnet run   -c Release --project sniffer/JASniffer.Web     # поднять с�
 
 ---
 
-## Экспорт `.saz`
+## Экспорт / импорт `.saz`
 
 Кнопка **Export .saz** сохраняет все (или отфильтрованные) сессии в архив
 формата Fiddler:
@@ -139,18 +139,36 @@ JASniffer-YYYYMMDD-HHMMSS.saz   (ZIP)
 └── raw/
     ├── 001_c.txt   (сырой запрос:  origin-form request-line + Host + заголовки + тело)
     ├── 001_s.txt   (сырой ответ:   HTTP/1.1 <status> + заголовки + ДЕКОДИРОВАННОЕ тело, Content-Length пересчитан)
-    ├── 001_m.xml   (метаданные сессии Fiddler: SessionTimers + SessionFlags)
+    ├── 001_m.xml   (метаданные сессии Fiddler: SessionTimers + SessionFlags + x-jasniffer-* флаги)
+    ├── 001_f.json  (ПОЛНЫЙ отпечаток запроса: JA3/JA4 + шифры/расширения/кривые/ALPN/…)
     └── 002_…
 ```
 
 Файл открывается в Fiddler Classic/Everywhere — там видны те же запросы/ответы.
 Туннелированные (неинспектированные) сессии в архив не попадают.
 
+**Полный отпечаток каждого запроса сохраняется в архиве.** Для каждой сессии
+пишется `raw/NNN_f.json` — реальный отпечаток апстрим‑лега (JA3‑строка + MD5, JA4,
+версия TLS, списки шифров/расширений/кривых/point‑formats/supported‑versions/
+signature‑algorithms/ALPN), снятый по loopback для активного пресета. Схема, полный
+URL, тайминги и краткая сводка JA3/JA4 дублируются в `x-jasniffer-*` флагах в
+`NNN_m.xml` (видны в Fiddler). Всё это — аддитивно: сторонний Fiddler их просто
+игнорирует.
+
+Кнопка **Import .saz** загружает архив обратно: каждая пара запрос/ответ
+восстанавливается в сессию **вместе с полным отпечатком** (из `NNN_f.json`), поэтому
+вкладка **Инфо** показывает JA3/JA4 даже для архива, снятого на другой машине, без
+повторного скана. Импорт работает и при выключенном захвате (это явное действие
+пользователя), а восстановленные сессии сразу появляются во всех подключённых UI
+через SignalR. Чужой архив (стоковый Fiddler, без наших расширений) тоже
+импортируется — по возможности: схема/порт выводятся из egress‑порта и заголовка
+`Host`, отпечаток при этом отсутствует.
+
 ---
 
 ## Меню настроек, Resender, JA3
 
-Тулбар компактный: **Resender · Clear · Export .saz · ⚙ Settings**. Всё
+Тулбар компактный: **Resender · Clear · Export .saz · Import .saz · ⚙ Settings**. Всё
 управление спрятано в **⚙ Settings**:
 
 - **Режим захвата** (System / Manual — см. ниже);
@@ -431,7 +449,7 @@ TCP/TLS‑туннелем: браузер продолжает работать
 JASniffer.sln            отдельное решение снифера (3 проекта + движок JAHTTPClient)
 src/JAHTTPClient/        существующий движок (Chrome JA3). Минимальные добавления: опции WithoutCookieJar, IsolateRedirectCookies.
 sniffer/JASniffer.Core/  модели сессий, SessionStore, генерация/кэш сертификатов (CertificateAuthority),
-                         разбор (params/cookies/auth), экспорт .saz (SazExporter), настройки.
+                         разбор (params/cookies/auth), экспорт/импорт .saz (SazExporter/SazImporter), настройки.
 sniffer/JASniffer.Proxy/ TcpListener :8866, разбор HTTP/CONNECT (Http1Reader/Http1Request),
                          TLS‑as‑server, ретрансляция через JAHTTPClient (UpstreamRelay), сырой туннель.
 sniffer/JASniffer.Web/   ASP.NET Core хост: статика wwwroot (SPA), REST API, SignalR hub,
@@ -453,7 +471,8 @@ SPA — vanilla JS/HTML/CSS из `wwwroot` (без Node‑сборки); кли�
 | DELETE | `/api/sessions/{id}` | удалить одну сессию |
 | POST | `/api/clear` | очистить список |
 | GET | `/api/ca.cer` | скачать корневой CA (DER) |
-| GET | `/api/export.saz` | экспорт (`?ids=1,2,3` — выбранные) |
+| GET | `/api/export.saz` | экспорт (`?ids=1,2,3` — выбранные); включает полный отпечаток каждого запроса |
+| POST | `/api/import.saz` | импорт архива (сырые байты `.saz` в теле); восстанавливает сессии вместе с отпечатками |
 | POST | `/api/system-proxy` | `{ "enabled": true|false }` — режим System/Manual (Windows) |
 | POST | `/api/udp-capture` | `{ "enabled": true|false }` — пассивный UDP через WinDivert (Windows) |
 | POST | `/api/install-windivert` | автоустановка WinDivert (скачать + проверить SHA‑256) |

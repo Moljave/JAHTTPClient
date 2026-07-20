@@ -51,7 +51,8 @@ public sealed record SessionDetailDto(
     BodyDto ResponseBody,
     string? TlsSummary,
     string? HostIp,
-    string? ClientEndpoint);
+    string? ClientEndpoint,
+    SessionFingerprint? Fingerprint);
 
 /// <summary>Settings echoed to / accepted from the UI.</summary>
 public sealed record SettingsDto(
@@ -126,7 +127,8 @@ public static class DtoMapper
         ToBody(s.ResponseBody, s.ResponseContentType, s.ResponseBodyTruncated, s.BodyLength),
         s.TlsSummary,
         s.HostIp,
-        s.ClientEndpoint);
+        s.ClientEndpoint,
+        s.Fingerprint);
 
     private static List<HeaderDto> ToHeaderDtos(IReadOnlyList<HeaderEntry> headers)
     {

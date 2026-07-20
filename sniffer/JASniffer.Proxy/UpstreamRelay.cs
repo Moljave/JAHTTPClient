@@ -66,6 +66,16 @@ public sealed class UpstreamRelay : IDisposable
     private readonly Lock _swap = new();
     private readonly ConcurrentDictionary<string, string?> _hostIpCache = new(StringComparer.OrdinalIgnoreCase);
 
+    // The full upstream fingerprint is fully determined by (preset, forceHttp1), so it is
+    // captured ONCE per distinct config over loopback (in the background) and reused for every
+    // request that config relays — never per request, and never on the request's critical path.
+    // A cached null means "captured, but the engine couldn't be self-tested for this preset"
+    // (e.g. a custom ClientHello that fails to build): it's cached too, so a failing preset can
+    // never trigger a repeated multi-second capture on every request. _fpInFlight dedupes so at
+    // most one capture per key runs at a time.
+    private readonly ConcurrentDictionary<string, SessionFingerprint?> _fpCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _fpInFlight = new(StringComparer.Ordinal);
+
     // Swapped atomically by Reconfigure when the fingerprint preset or forced HTTP
     // version changes (both are baked at client construction in the engine). volatile so
     // a concurrent RelayAsync reading them lock-free observes the post-swap instance.
@@ -93,6 +103,7 @@ public sealed class UpstreamRelay : IDisposable
         CurrentPresetLabel = label;
         (_faithful, _follow) = BuildClients(_preset, _forceHttp1, _insecure, settings.MaxRedirects);
         ApplyProxyToClients();
+        PrewarmFingerprint(); // start capturing the active preset's fingerprint at startup
     }
 
     /// <summary>
@@ -122,6 +133,7 @@ public sealed class UpstreamRelay : IDisposable
             _forceHttp1 = forceHttp1;
             _insecure = insecure;
             ApplyProxyToClients(); // the fresh clients start direct — restore the egress proxy
+            PrewarmFingerprint();  // begin capturing the new preset's fingerprint proactively
 
             // Dispose the superseded clients after a grace longer than the request
             // timeout (100 s), so a request still in flight on an old client finishes (or
@@ -205,6 +217,96 @@ public sealed class UpstreamRelay : IDisposable
     /// </summary>
     public Task<Ja3Report> CaptureClientHelloAsync(CancellationToken ct)
         => Ja3SelfTest.CaptureAsync(_preset, _forceHttp1, CurrentPresetLabel, ct);
+
+    /// <summary>
+    /// Returns the full upstream fingerprint for the currently active preset if it has already
+    /// been captured, else null — and, when not yet cached, kicks off a one-time background
+    /// capture so subsequent requests get it. This NEVER blocks: the loopback self-test is
+    /// bounded but can still take seconds (or fail) for a given preset, and the proxy's request
+    /// path must not wait on it. The first few requests after a preset change may therefore
+    /// carry no fingerprint; <see cref="PrewarmFingerprint"/> (run at startup / on reconfigure)
+    /// makes that window vanishingly small in practice.
+    /// </summary>
+    private SessionFingerprint? CurrentFingerprint()
+    {
+        var preset = _preset;
+        var forceHttp1 = _forceHttp1;
+        var label = CurrentPresetLabel;
+        var key = $"{preset}|{forceHttp1}";
+
+        if (_fpCache.TryGetValue(key, out var cached))
+        {
+            // The ClientHello is identical for every selection sharing this (preset, forceHttp1),
+            // but the display label can differ (two custom captures over the same base preset),
+            // so stamp the current label onto the returned copy.
+            return cached is null || cached.Preset == label ? cached : cached with { Preset = label };
+        }
+
+        EnsureFingerprintCapture(preset, forceHttp1, key);
+        return null;
+    }
+
+    /// <summary>Triggers the current preset's background fingerprint capture if not already done.</summary>
+    private void PrewarmFingerprint()
+    {
+        var key = $"{_preset}|{_forceHttp1}";
+        if (!_fpCache.ContainsKey(key))
+        {
+            EnsureFingerprintCapture(_preset, _forceHttp1, key);
+        }
+    }
+
+    // Captures the (preset, forceHttp1) fingerprint over loopback exactly once, in the
+    // background, and caches the result — including null on failure, so a preset whose
+    // ClientHello can't be self-tested never re-triggers a capture on every request.
+    private void EnsureFingerprintCapture(Ja3Preset preset, bool forceHttp1, string key)
+    {
+        if (!_fpInFlight.TryAdd(key, 0))
+        {
+            return; // a capture for this key is already running
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // CancellationToken.None: this shared, cached capture must not be torn down by
+                // one request's cancellation. Ja3SelfTest bounds it internally (~5s).
+                var report = await Ja3SelfTest.CaptureAsync(preset, forceHttp1, LabelFor(preset), CancellationToken.None).ConfigureAwait(false);
+                _fpCache[key] = report.Ok ? ToSessionFingerprint(report) : null;
+            }
+            catch (Exception)
+            {
+                _fpCache[key] = null;
+            }
+            finally
+            {
+                _fpInFlight.TryRemove(key, out _);
+            }
+        });
+    }
+
+    private static SessionFingerprint ToSessionFingerprint(Ja3Report r) => new()
+    {
+        Preset = r.Preset,
+        Ja3 = r.Ja3,
+        Ja3Md5 = r.Ja3Md5,
+        Ja4 = r.Ja4,
+        TlsVersion = r.TlsVersion,
+        CipherCount = r.CipherCount,
+        ExtensionCount = r.ExtensionCount,
+        Tls13 = r.Tls13,
+        KeyShare = r.KeyShare,
+        Grease = r.Grease,
+        Sni = r.Sni,
+        Ciphers = r.Ciphers ?? [],
+        Extensions = r.Extensions ?? [],
+        Curves = r.Curves ?? [],
+        PointFormats = r.PointFormats ?? [],
+        SupportedVersions = r.SupportedVersions ?? [],
+        SignatureAlgorithms = r.SignatureAlgorithms ?? [],
+        Alpn = r.Alpn ?? [],
+    };
 
     /// <summary>
     /// Captures the real ClientHello for EVERY built-in preset over loopback in parallel and
@@ -305,6 +407,10 @@ public sealed class UpstreamRelay : IDisposable
         }
 
         session.FollowedRedirects = follow;
+
+        // Stamp the upstream fingerprint from the cache (non-blocking); if it isn't captured
+        // yet this returns null and triggers a one-time background capture for later requests.
+        session.Fingerprint = CurrentFingerprint();
 
         // Resolve the host IP off the critical path: it is purely informational (shown in
         // the UI / .saz export), so run the lookup concurrently with the request instead of

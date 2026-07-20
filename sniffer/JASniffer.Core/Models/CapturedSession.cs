@@ -82,6 +82,15 @@ public sealed class CapturedSession
     /// </summary>
     public string? TlsSummary { get; set; }
 
+    /// <summary>
+    /// Full TLS fingerprint (JA3/JA4 + parsed cipher/extension/curve/ALPN detail) of the
+    /// upstream leg for this request, captured over loopback for the active preset. Stored
+    /// per request so it survives a <c>.saz</c> export/import and is shown in the Info tab
+    /// even for archives opened on a machine that never ran a live scan. Null when the
+    /// engine couldn't be self-tested, or for tunneled/UDP flows that never used it.
+    /// </summary>
+    public SessionFingerprint? Fingerprint { get; set; }
+
     /// <summary><c>true</c> only when the upstream handshake/exchange completed without a transport error.</summary>
     public bool UpstreamOk { get; set; }
 

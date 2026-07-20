@@ -408,7 +408,10 @@
   // upstream result, timings and sizes.
   function renderInfo(d) {
     const s = d.summary;
-    const fp = state.fpScan ? state.fpScan[s.fingerprintPreset] : null;
+    // Prefer the fingerprint captured for THIS request (stored on the session, and restored
+    // from a .saz on import); fall back to the last live full-scan matched by preset label.
+    const fp = d.fingerprint || (state.fpScan ? state.fpScan[s.fingerprintPreset] : null);
+    const fpOk = !!fp && (fp.ok === undefined ? !!fp.ja3Md5 : fp.ok);
 
     const client = kvSection("Клиент", [
       ["Клиент (endpoint)", d.clientEndpoint],
@@ -435,7 +438,7 @@
     let fpRows;
     if (s.wasTunneled || s.isUdp) {
       fpRows = `<tr><td class="k">—</td><td class="v muted">Сессия не проходила через движок (туннель / UDP).</td></tr>`;
-    } else if (fp && fp.ok) {
+    } else if (fpOk) {
       fpRows = kvRows([
         ["Пресет", fp.preset],
         ["JA3", fp.ja3Md5],
@@ -610,6 +613,33 @@
     $("#btnExport").addEventListener("click", () => {
       const filtered = state.filtered.length !== state.ids.length;
       window.open("/api/export.saz" + (filtered ? "?ids=" + state.filtered.join(",") : ""), "_blank");
+    });
+    // Import .saz: pick a file, POST its raw bytes; reconstructed sessions (with their full
+    // per-request fingerprint) stream back in over SignalR, so no manual refresh is needed.
+    $("#btnImport").addEventListener("click", () => $("#fileImport").click());
+    $("#fileImport").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = ""; // let the same file be re-picked later
+      if (!file) return;
+      try {
+        const res = await fetch("/api/import.saz", {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: await file.arrayBuffer(),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.error || "Не удалось импортировать архив.");
+          return;
+        }
+        const n = data.imported || 0;
+        const fp = data.withFingerprint || 0;
+        alert(n === 0
+          ? "В архиве не найдено сессий."
+          : `Импортировано сессий: ${n}` + (fp ? ` (с отпечатком: ${fp})` : ""));
+      } catch {
+        alert("Не удалось импортировать архив.");
+      }
     });
     $("#btnCa").addEventListener("click", () => window.open("/api/ca.cer", "_blank"));
     $("#btnCaPem").addEventListener("click", () => window.open("/api/ca.pem", "_blank"));

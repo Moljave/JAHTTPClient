@@ -170,6 +170,43 @@ api.MapGet("/export.saz", (string? ids, SessionStore store) =>
         $"JASniffer-{DateTime.Now:yyyyMMdd-HHmmss}.saz");
 });
 
+// Import a .saz archive (the raw bytes are POSTed as the request body). Each archived
+// exchange is reconstructed into a session — including the full per-request fingerprint
+// when the archive was produced by JASniffer — and added to the store regardless of the
+// live Capture toggle. Imported sessions stream to every connected UI over SignalR.
+api.MapPost("/import.saz", async (HttpRequest req, SessionStore store, CancellationToken ct) =>
+{
+    using var buffer = new MemoryStream();
+    await req.Body.CopyToAsync(buffer, ct);
+    if (buffer.Length == 0)
+    {
+        return Results.BadRequest(new { error = "Пустой запрос — не передан .saz архив." });
+    }
+
+    buffer.Position = 0;
+    IReadOnlyList<CapturedSession> imported;
+    try
+    {
+        imported = SazImporter.Import(buffer, store.NextId);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = "Не удалось прочитать архив: " + ex.Message });
+    }
+
+    var withFingerprint = 0;
+    foreach (var session in imported)
+    {
+        store.Add(session, force: true);
+        if (session.Fingerprint is not null)
+        {
+            withFingerprint++;
+        }
+    }
+
+    return Results.Ok(new { imported = imported.Count, withFingerprint });
+});
+
 api.MapPost("/system-proxy", (SystemProxyRequest body, SystemProxy systemProxy) =>
 {
     var ok = body.Enabled ? systemProxy.Enable(proxyPort) : systemProxy.Disable();

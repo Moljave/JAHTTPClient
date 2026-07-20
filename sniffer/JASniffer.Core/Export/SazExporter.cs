@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using JASniffer.Core.Models;
 
 namespace JASniffer.Core.Export;
@@ -59,6 +60,14 @@ public static class SazExporter
             WriteBytes(zip, $"raw/{n}_c.txt", BuildRequestRaw(s));
             WriteBytes(zip, $"raw/{n}_s.txt", BuildResponseRaw(s));
             WriteText(zip, $"raw/{n}_m.xml", BuildMetadata(s, ordinal));
+
+            // Full per-request upstream fingerprint (JA3/JA4 + parsed cipher/extension/curve
+            // detail) as a JSON sidecar, so it survives the round-trip and the Info tab can
+            // show it after import without a live scan. Omitted when unknown (e.g. tunneled).
+            if (s.Fingerprint is not null)
+            {
+                WriteText(zip, SazFormat.FingerprintPath(n), JsonSerializer.Serialize(s.Fingerprint, SazFormat.Json));
+            }
 
             index.Append("<tr><td>").Append(ordinal).Append("</td><td>").Append(s.StatusCode)
                  .Append("</td><td>").Append(s.Scheme).Append("</td><td>").Append(WebEncode(s.Host))
@@ -143,9 +152,47 @@ public static class SazExporter
                 <SessionFlag N="x-hostip" V="{XmlEncode(s.HostIp ?? string.Empty)}" />
                 <SessionFlag N="x-responsebodytransferlength" V="{s.ResponseBody.Length}" />
                 <SessionFlag N="x-egressport" V="{s.Port}" />
-              </SessionFlags>
+            {JasnifferFlags(s)}  </SessionFlags>
             </Session>
             """;
+    }
+
+    // JASniffer-specific session metadata Fiddler's format has no slot for. Additive: a stock
+    // Fiddler reader shows these as extra flags; the importer reads them to reconstruct the
+    // scheme/URL/timing/fingerprint that a bare request+response can't convey.
+    private static string JasnifferFlags(CapturedSession s)
+    {
+        var sb = new StringBuilder();
+        void Flag(string name, string? value)
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                sb.Append("    <SessionFlag N=\"").Append(name).Append("\" V=\"").Append(XmlEncode(value)).Append("\" />\r\n");
+            }
+        }
+
+        Flag(SazFormat.FlagScheme, s.Scheme);
+        Flag(SazFormat.FlagHost, s.Host);
+        Flag(SazFormat.FlagUrl, s.Url);
+        Flag(SazFormat.FlagFinalUrl, s.FinalUrl);
+        Flag(SazFormat.FlagDurationMs, s.DurationMs.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        Flag(SazFormat.FlagReqHttp, s.RequestHttpVersion);
+        Flag(SazFormat.FlagRespHttp, s.ResponseHttpVersion);
+        Flag(SazFormat.FlagPreset, s.FingerprintPreset);
+        Flag(SazFormat.FlagUpstreamOk, s.UpstreamOk ? "1" : "0");
+        Flag(SazFormat.FlagError, s.Error);
+        Flag(SazFormat.FlagTlsSummary, s.TlsSummary);
+
+        // Fingerprint headline, kept visible in Fiddler's flag view; full detail is the sidecar.
+        if (s.Fingerprint is { } fp)
+        {
+            Flag(SazFormat.FlagJa3, fp.Ja3);
+            Flag(SazFormat.FlagJa3Md5, fp.Ja3Md5);
+            Flag(SazFormat.FlagJa4, fp.Ja4);
+            Flag(SazFormat.FlagTls, fp.TlsVersion);
+        }
+
+        return sb.ToString();
     }
 
     private static void WriteText(ZipArchive zip, string path, string content)

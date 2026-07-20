@@ -27,7 +27,9 @@
       <button id="btnResender" class="btn" title="Редактировать запрос и отправить через движок с отпечатком Chrome, видя ответ рядом">⤴ Resender</button>
       <button id="btnPause" class="btn" title="Пауза/возобновление записи сессий (Capture)">⏸ Пауза</button>
       <button id="btnClear" class="btn" title="Очистить список сессий">Clear</button>
-      <button id="btnExport" class="btn" title="Экспорт сессий в архив Fiddler .saz">Export .saz</button>
+      <button id="btnExport" class="btn" title="Экспорт сессий в архив Fiddler .saz (с полными отпечатками для каждого запроса)">Export .saz</button>
+      <button id="btnImport" class="btn" title="Импорт архива .saz — сессии восстанавливаются вместе с полным отпечатком каждого запроса">Import .saz</button>
+      <input id="fileImport" type="file" accept=".saz,application/octet-stream" hidden />
       <button id="btnSettings" class="btn" title="Настройки">⚙ Settings</button>
       <button id="btnTheme" class="btn icon" title="Переключить тему (светлая/тёмная)" aria-label="Переключить тему">🌙</button>
       <span id="connDot" class="dot dot-off" title="SignalR: подключение…"></span>

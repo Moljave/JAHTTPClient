@@ -28,10 +28,14 @@ public sealed class SessionStore(SnifferSettings settings)
     /// <summary>Allocates the next sequential session id (1-based, matches the .saz ordinal).</summary>
     public int NextId() => Interlocked.Increment(ref _nextId);
 
-    /// <summary>Adds a freshly created (usually still pending) session and notifies listeners.</summary>
-    public void Add(CapturedSession session)
+    /// <summary>
+    /// Adds a freshly created (usually still pending) session and notifies listeners. When
+    /// <paramref name="force"/> is set the session is stored even while live capture is paused —
+    /// used by archive import, an explicit user action that must never be dropped by the toggle.
+    /// </summary>
+    public void Add(CapturedSession session, bool force = false)
     {
-        if (!_settings.Capture)
+        if (!force && !_settings.Capture)
         {
             return;
         }
